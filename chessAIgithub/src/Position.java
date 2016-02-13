@@ -86,25 +86,6 @@ public class Position {
         }
 	
 	public void print(BoardController c) {
-		for(int y = bRows-1; y >= 0; --y) {
-			for(int x = 0; x < bCols; ++x) {
-				int v = this.board[x][y];
-				if(v == Empty) System.out.print(".");
-				if(v == WKing) System.out.print("k");
-				if(v == WQueen) System.out.print("q");
-				if(v == WRook) System.out.print("r");
-				if(v == WBishop) System.out.print("b");
-				if(v == WKnight) System.out.print("n");
-				if(v == WPawn) System.out.print("p");
-				if(v == BKing) System.out.print("K");
-				if(v == BQueen) System.out.print("Q");
-				if(v == BRook) System.out.print("R");
-				if(v == BBishop) System.out.print("B");
-				if(v == BKnight) System.out.print("N");
-				if(v == BPawn) System.out.print("P");
-			}
-			System.out.println();
-		}
                 // print to GUI
                 String[][] b = new String[6][6];
 		for(int y = bRows-1; y >= 0; --y) {

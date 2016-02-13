@@ -31,7 +31,7 @@ public class Main {
         }
 	
 	static double alphabeta(Position p, int depth, double alpha, double beta, int player) {
-		// 0 tries to maximize, 1 tries to minimize
+            // 0 tries to maximize, 1 tries to minimize
 	    if (p.winner == -1) return -1E10-depth; // prefer to win sooner
 	    if (p.winner == +1) return +1E10+depth; // and lose later
 				    
@@ -39,10 +39,6 @@ public class Main {
 		Vector<Position> P = p.getNextPositions();
 		Collections.sort(P, (new Main()).new PositionComparator());
 		if(player == 0) Collections.reverse(P);
-		
-		//System.out.println("Pelaaja: "+player+" koko: "+P.size());
-		//System.out.println("Ensimm�inen: "+eval(P.elementAt(0)));
-		//System.out.println("Viimeinen: "+eval(P.lastElement()));
 		
 		if(player == 0) {
 			for(int i = 0; i < P.size(); ++i) {
@@ -63,110 +59,115 @@ public class Main {
 	static double minmax(Position p, int depth, int player) {
 		double alpha = -Double.MAX_VALUE, beta = Double.MAX_VALUE;
 		return alphabeta(p,depth,alpha,beta,player);
-		/*
-		//return (p.whiteToMove ? -1 : 1) * eval(p);
-		if(depth <= 0) return eval(p);
-		
-		double val = eval(p);
-		if(Math.abs(val) > 1e8) return val; // prevent king exchange :/
-		
-		double alpha = p.whiteToMove ? 1e12 : -1e12;
-		
-		Vector<Position> P = p.getNextPositions();
-		
-		for(int i = 0; i < P.size(); ++i) {
-			if(p.whiteToMove) {
-				alpha = Math.min(alpha, minmax(P.elementAt(i),depth-1));
-			} else alpha = Math.max(alpha, minmax(P.elementAt(i),depth-1));
-		}
-		
-		return alpha;
-		*/
 	}
 	
 	public static void main(String[] args) {
                 MainFrame frame = new MainFrame();
-		// you get the white pieces, we play the black pieces
-		oe = new OurEvaluator();
-		ye = new YourEvaluator();
-		//ye = new OurEvaluator();
+                
+		//oe = new OurEvaluator(); // <-- defaultAI
+		//ye = new YourEvaluator();
+                
+                oe = new OurEvaluator(); // <-- defaultAI
+                ye = new YourEvaluator();
+                //ye = new FoodChainV1plusHash();
 		
 		int depth = 5;
 		
-		Position p = new Position();
-		p.setStartingPosition();
-		p.print(frame.c);
+
+                
+                double whiteTimeTotal = 0;
+                double blackTimeTotal = 0;
+                int whiteWins = 0;
+                int blackWins = 0;
+                int ties = 0;
 		
-		System.out.println("Eval: "+oe.eval(p));
 		
-		long ms = System.currentTimeMillis();
 		
-		while(true) {
-			ce = oe;
-			//System.out.println("Minmax: "+minmax(p,3,(p.whiteToMove?1:0)));
-			ce = ye;
-			Vector<Position> P = p.getNextPositions();
-			
-			double evaluation = (new OurEvaluator()).eval(p);
-			
-			if(p.winner == +1) {
-                                System.out.println("White won.");
-				frame.c.gameOver("White won.");
-				break;
-			} 
-			
-			if(p.winner == -1) {
-                                System.out.println("Black won.");
-				frame.c.gameOver("Black won.");
-				break;
-			}
-			
-			if(P.size() == 0) {
-				System.out.println("No more available moves");
-                                frame.c.gameOver("No more available moves");
-				break;
-			}
-			
-			Position bestPosition = new Position();
-			if(p.whiteToMove) {
-				ce = ye;
-				double max = -1./0.;
-				for(int i = 0; i < P.size(); ++i) {
-					double val = minmax(P.elementAt(i),depth,1);
-					if(max < val) {
-						bestPosition = P.elementAt(i);
-						max = val;
-					}
-				}
-			} else {
-				ce = oe;
-				double min = 1./0.;
-				for(int i = 0; i < P.size(); ++i) {
-					double val = minmax(P.elementAt(i),depth,0);
-					if(min > val) {
-						bestPosition = P.elementAt(i);
-						min = val;
-					}
-				}
-			}
-			
-			assert p.whiteToMove != bestPosition.whiteToMove;
-			p = bestPosition;
-			p.print(frame.c);
-			
-			long curtime = System.currentTimeMillis();
-			System.out.println((p.whiteToMove ? "Black" : "White") +" move took "+((curtime-ms)/1000.0)+" seconds");
-			ms = curtime;
-		}
+
 		
-		/*
-		for(int i = 0; i < 60; ++i) {
-			System.out.println("----------------");
-			Vector<Position> P = p.getNextPositions();
-			p = P.elementAt((int)(Math.random()*P.size()));
-			p.print();
-			System.out.println("Eval: "+eval(p));
-		}
-		*/
+                while (true) {
+                    
+                    Position p = new Position();
+                    p.setStartingPosition();
+                    p.print(frame.c);
+                    oe.eval(p);
+                    
+                    long ms = System.currentTimeMillis();
+                    int moveNumber = 0;
+                    for (; moveNumber < 200; moveNumber++) {
+                            ce = oe;
+                            ce = ye;
+                            Vector<Position> P = p.getNextPositions();
+
+                            double evaluation = (new OurEvaluator()).eval(p);
+
+                            if(p.winner == +1) {
+                                    System.out.println("White won.");
+                                    frame.c.gameOver("White won.");
+                                    whiteWins++;
+                                    break;
+                            } 
+
+                            if(p.winner == -1) {
+                                    System.out.println("Black won.");
+                                    frame.c.gameOver("Black won.");
+                                    blackWins++;
+                                    break;
+                            }
+
+                            if(P.size() == 0) {
+                                    System.out.println("No more available moves");
+                                    frame.c.gameOver("No more available moves");
+                                    ties++;
+                                    break;
+                            }
+
+                            Position bestPosition = new Position();
+                            if(p.whiteToMove) {
+                                    ce = ye;
+                                    double max = -1./0.;
+                                    for(int i = 0; i < P.size(); ++i) {
+                                            double val = minmax(P.elementAt(i),depth,1);
+                                            if(max < val) {
+                                                    bestPosition = P.elementAt(i);
+                                                    max = val;
+                                            }
+                                    }
+                            } else {
+                                    ce = oe;
+                                    double min = 1./0.;
+                                    for(int i = 0; i < P.size(); ++i) {
+                                            double val = minmax(P.elementAt(i),depth,0);
+                                            if(min > val) {
+                                                    bestPosition = P.elementAt(i);
+                                                    min = val;
+                                            }
+                                    }
+                            }
+
+                            assert p.whiteToMove != bestPosition.whiteToMove;
+                            p = bestPosition;
+                            p.print(frame.c);
+
+                            long curtime = System.currentTimeMillis();
+
+                            double timespent = (curtime-ms)/1000.0;
+                            if (p.whiteToMove) {
+                                blackTimeTotal += timespent;
+                            } else {
+                                whiteTimeTotal += timespent;
+                            }
+                            //System.out.println((p.whiteToMove ? "Black" : "White") +" move took "+timespent+" seconds");
+                            //System.out.println("     Overall white has spent " + whiteTimeTotal + "s, black has spent " + blackTimeTotal + "s");
+                            ms = curtime;
+                    }
+                    if (moveNumber == 200) {
+                        System.out.println("TIE - after 200 moves");
+                        ties++;
+                    }
+                    System.out.println("Tally :: WHITE " + whiteWins + " :: BLACK " + blackWins + " :: TIES " + ties);
+                    System.out.println("Time :: white " + whiteTimeTotal + " :: black " + blackTimeTotal);
+                }
+                
 	}
 }

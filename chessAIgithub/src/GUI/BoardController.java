@@ -46,7 +46,7 @@ public class BoardController extends JPanel implements ActionListener, MouseList
         
         positions = new ArrayList<>();
         positions.add(genStartPosition());
-        currentPositionIndex = -1;
+        currentPositionIndex = 0;
         nextPosition();
         repaint();
     }
@@ -78,12 +78,22 @@ public class BoardController extends JPanel implements ActionListener, MouseList
     }
     
     public void addNewPosition(String[][] p) {
-        positions.add(p);
+        positions.add(flip(p));
         if (waitingForNextPosition) {
             waitingForNextPosition = false;
             nextPosition();
             repaint();
         }
+    }
+    
+    private String[][] flip(String[][] original) {
+        String[][] flipped = new String[6][6];
+        for (int x=0; x<6; x++) {
+            for (int y=0; y<6; y++) {
+                flipped[x][5-y] = original[x][y];
+            }
+        }
+        return flipped;
     }
     
     public void nextPosition() {

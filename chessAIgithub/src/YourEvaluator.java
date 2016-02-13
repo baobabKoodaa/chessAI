@@ -9,99 +9,187 @@ public class YourEvaluator extends Evaluator {
     
     public static final int BLACK = 0;
     public static final int WHITE = 1;
+    
+    public static final double PVrook = 500;
+    public static final double PVknight = 300;
+    public static final double PVqueen = 900;
+    public static final double PVpawn = 100;
+    
 
     // Position specific
     int turn; // BLACK or WHITE
     boolean endgame;
+    int pieceCount;
+    int[] pieceValues;
     int[][] b;
     Double[][][] relativeSqValue;
     Square[] kingLives;
     int[][][] control;
     List<Square>[] pawns;
-    List<Move> possibleCaptureMoves;
-    List<Move> possibleCheckMoves;
     
     // Cleared at each eval call, modified inside minimax search within the check/capture tree
     HashMap<Long, Double> evaluatedPositions;
+    HashMap<Long, int[][]> collisionChecker;
     
     // Set once or twice during a match
-    int[] kingWithPawnsBonus;
     int[] kingEscapeRoutesBonus;
-    int[][][] controlBonus;
+    double[][][] controlBonus;
     int enemyControlNearKingPenalty;
+    double[][] pawnUpgradePotentialBonus;
     
     // Set only once at match start
     Double[][] pieceValue;
     List<Square>[][] neighboringSquares;
     List<Square>[][] knightMoveLists;
+    Random rng;
+    
+    // Statistic collection variables
+    public long countFoundHash;
+    public long countNotFoundHash;
     
     public YourEvaluator() {
+        evaluatedPositions = new HashMap<>();
+        collisionChecker = new HashMap<>();
+        rng = new Random();
+        endgame = false;
         enemyControlNearKingPenalty = 10;
+        generatePawnUpgradePotentialBonuses();
         generateNeighboringSquaresLists();
         generateKnightMoveLists();
-        generateRookMoveLists();
-        generateQueenMoveLists();
-        endgame = false;
-        generateKingWithPawnsBonus(endgame);
         generateKingEscapeRoutesBonus();
         generateControlBonus();
         generatePieceValues();
+        
+        // statistics
+        countFoundHash = 0;
+        countNotFoundHash = 0;
     }
     
     public double eval(Position p) {
-        evaluatedPositions = new HashMap<>();
-            // We need this because a check sequence can be infinite
-            // Also, we don't have to search identical subtrees twice.
+        //if (rng.nextInt(10000) == 0) System.out.println("Hash table size " + evaluatedPositions.size() + " has helped " + (countFoundHash * 1.0 / (countNotFoundHash+countFoundHash)));
         return ev(p);
     }
     
     public double ev(Position p) {
-        long thisPositionHash = hashPosition(p);
-        if (evaluatedPositions.containsKey(thisPositionHash)) {
-            return evaluatedPositions.get(thisPositionHash);
-        }
         b = p.board;
-        relativeSqValue = new Double[2][6][6];
-        double v = 0;
+//        long thisPositionHash = hashPosition(p);
+//        if (evaluatedPositions.containsKey(thisPositionHash)) {
+//            countFoundHash++;
+//            //return evaluatedPositions.get(thisPositionHash);
+//        } else countNotFoundHash++;
+        
         
         // initialize position specific static variables
+        relativeSqValue = new Double[2][6][6];
+        pieceCount = 36; // deduct empty squares to reach actual piececount
+        pieceValues = new int[2];
         kingLives = new Square[2];
         control = new int[2][6][6];
         pawns = new ArrayList[2];
         pawns[BLACK] = new ArrayList<Square>(6);
         pawns[WHITE] = new ArrayList<Square>(6);
         turn = (p.whiteToMove ? WHITE : BLACK);
-        possibleCaptureMoves = new ArrayList<>();
-        possibleCheckMoves = new ArrayList<>();
         
-        for (int x = 0; x < b.length; ++x) {
-            for (int y = 0; y < b[x].length; ++y) {
+        //TODO: taulukko josta pelin vaiheen (pieceCount) ja yksikön tyypin (heppa) mukaan
+        // pisteytys ruudulle jossa yksikkö on: v += t[BLACK][heppa][pieceCount][x][y]
+        
+        double v = 0;
+
+        for (int x = 0; x < b.length; x++) {
+            for (int y = 0; y < b[x].length; y++) {
                 v += preProcessSquare(x,y);
             }
         }
         if (kingLives[WHITE] == null) return -1e9;
         if (kingLives[BLACK] == null) return 1e9;
+        if (endgame = false && pieceCount < 13) {
+            endgame = true;
+            enemyControlNearKingPenalty = 0; // king becomes a playah!
+        }
+        
+        //TODO: if (endGame == true && pieceCount > 13)
+        
+        
+        //double v = pieceValues[WHITE] - pieceValues[BLACK] + pieceValueDiffBonus;
         v += postProcessKing(WHITE, kingLives[WHITE]);
         v -= postProcessKing(BLACK, kingLives[BLACK]);
+        v += postProcessPawns(WHITE);
+        v -= postProcessPawns(BLACK);
 
         for (int x=0; x<=5; x++) {
             for (int y=0; y<=5; y++) {
-                //TODO: vaihda *1 -- sen mukaan ollaanko keskellä lautaa / vihun päässä, jne.
-                v += control[WHITE][x][y] * relativeSqValue[WHITE][x][y] * 1;
-                v -= control[BLACK][x][y] * relativeSqValue[BLACK][x][y] * 1;
+                // control = lkm uhkauksia ruutuun
+                // relativeSqVal = ruudussa olevan uhkauksen/suojauksen arvo
+                // controlBonus = ruudun arvo sijainnin mukaan, keskeltä/vihun päästä isompi arvo
+
+                v += control[WHITE][x][y] * relativeSqValue[WHITE][x][y] * controlBonus[WHITE][x][y];
+                v -= control[BLACK][x][y] * relativeSqValue[BLACK][x][y] * controlBonus[BLACK][x][y];
             }
         }
         
-        //TODO: if endgame == false && piececount < 8 -> muuta endgame=true ja REGEN JUTTUJA
         
+        //TODO: nappuloiden suhteelliset arvot; häviöllä oleva ei halua vaihtokauppoja!
+        //  (endgames ei toimi ihan niin:
+        //     jos esim. solttu+heppa vs. solttu jäljellä -> soltut vaihtoon -> tasuri)
         
+        //TODO: pisteytys jäljellä olevien siirtojen lkm!
+        //TODO: huom: blocked by chessmate! sillai blokatun yksikön arvo -50%?
         
+        //TODO: Square-luokka pois!
+        
+        // Oisko naiivi capturesequence arviointi parempi kuin uus minmax?
+        // Riippuen löytyykö huomattavaa eroa nappuloiden arvossa jossain capturesequencin
+        // "päätöshaarassa", voitais joko arvioida se päätöshaara tai tämä mistä lähdettiin haarautumaan.
+        // Tuleeko tässä ongelmia shakituksen kanssa?
         
         // Minimax into the capture/check tree, return min/max (depending on whose turn it is now)
         // of *exactly which positions??* from the tree. Consider null moves..?
         
-        evaluatedPositions.put(thisPositionHash, v);
+        //TODO: MonteCarlo-simulointi oikeiden taikalukujen löytämiseksi annetuista rangeista?
+        
+        //Uncomment this in production
+        //v += rng.nextInt(10);
+        
+//        if (evaluatedPositions.containsKey(thisPositionHash)) {
+//            if (v != evaluatedPositions.get(thisPositionHash)) {
+//                System.out.println("Mismatch");
+//            }
+//        }
+//        
+//        evaluatedPositions.put(thisPositionHash, v);
         return v;
+    }
+    
+    public long hashPosition(Position p) {
+        long hash = (p.whiteToMove ? 2 : 1); // !
+        long A = 31L;
+        for (int y=0; y<6; y++) {
+            for (int x=0; x<6; x++) {
+                hash *= A; // modulates by long overflow
+                hash += (b[x][y]+1);
+            }
+        }
+        hash *= A;
+        
+        // Collision checker, remove from production
+//        int[][] board = new int[6][6];
+//        for (int y=0; y<6; y++) {
+//            for (int x=0; x<6; x++) {
+//                board[x][y] = b[x][y];
+//            }
+//        }
+//        if (collisionChecker.containsKey(hash)) {
+//            int[][] other = collisionChecker.get(hash);
+//            for (int y=0; y<6; y++) {
+//                for (int x=0; x<6; x++) {
+//                    if (board[x][y] != other[x][y]) System.out.println("Collision!");
+//                    //else System.out.println("ok");
+//                }
+//            }
+//        }
+//        collisionChecker.put(hash, board);
+        
+        return hash;
     }
     
     public double preProcessSquare(int x, int y) {
@@ -119,7 +207,7 @@ public class YourEvaluator extends Evaluator {
             case Position.BKnight:  v -= preProcessKnight(BLACK, x, y);break;    
             case Position.BRook:    v -= preProcessRook(BLACK, x, y);break;
             case Position.BPawn:    v -= preProcessPawn(BLACK, x, y);break;    
-            default:                ; break;
+            default:                pieceCount--; break;
         }
         return v;
     }
@@ -135,37 +223,34 @@ public class YourEvaluator extends Evaluator {
      *          - save possible capture moves.
      */
     
-    /** Adds king-pawn bonuses. */
+    /** Mark that king lives. */
     public double preProcessKing(int color, int ax, int ay) {
         double v = 0;
-        int neighboringPawnsCount = 0;
-        int nontangentialEscapeRoutesCount = 0;
-        boolean[] escapesX = new boolean[6];
-        boolean[] escapesY = new boolean[6];
         for (Square neighbor : neighboringSquares[ax][ay]) {
             int x = neighbor.x;
             int y = neighbor.y;
             control[color][x][y]++;
             //TODO: Jos uhataan vihun nappia @x,y && vihulla ei controllia siihen ruutuun -> lisätään capturemoveseihin
+            //TODO: Jos kuninkaalla ei laillisia siirtoja, penalty!
             switch (color) {
                 case BLACK:
-                    if (Position.BPawn == b[x][y]) neighboringPawnsCount++;
+                    
                     break;
                 case WHITE:
-                    if (Position.WPawn == b[x][y]) neighboringPawnsCount++;
+                    
                     break;
                 default:
                     break;
             }
         }
 
-        v += kingWithPawnsBonus[neighboringPawnsCount];
         kingLives[color] = new Square(ax,ay);
         return v;
     }
     
     /** Adds score for non tangential escape routes for king,
-        deducts score for enemy's control in king-adjacent squares. */
+        deducts score for enemy's control in king-adjacent squares,
+        penalty for straying off before the endgame. */
     public double postProcessKing(int color, Square loc) {
         double v = 0;
         int enemyColor = (color+1)%2;
@@ -177,36 +262,47 @@ public class YourEvaluator extends Evaluator {
         for (Square neighbor : neighboringSquares[ax][ay]) {
             int x = neighbor.x;
             int y = neighbor.y;
-            if (Position.Empty == b[x][y]) {
-                if (control[enemyColor][x][y] > 0) {
-                    v -= enemyControlNearKingPenalty * control[enemyColor][x][y];
-                    continue; // can't escape to here
-                }
-                if (escapesX[x] || escapesY[y]) continue; // already counted a tangential escape
-                escapesX[x] = true;
-                escapesY[y] = true;
-                nontangentialEscapeRoutesCount++;
+            if (control[enemyColor][x][y] > 0) {
+                v -= enemyControlNearKingPenalty * control[enemyColor][x][y];
+                continue; // can't escape to here
             }
+            if (b[x][y] != Position.Empty) continue; // can't escape to here
+            if (escapesX[x] || escapesY[y]) continue; // already counted a tangential escape
+            escapesX[x] = true;
+            escapesY[y] = true;
+            nontangentialEscapeRoutesCount++;
         }
         v += kingEscapeRoutesBonus[nontangentialEscapeRoutesCount];
+        
+        if (endgame) {
+            // halutaan turvata solttujen nostamista
+        } else {
+            if (ay != 5 && ay != 0) {
+                v -= 10; // penalty kuningas ei päädyssä
+            } else {
+                //TODO: escaperoutes tehokkaammin tähän lohkoon
+                // tähän samalla myös "solttukilvestä" bonusta?
+                // ideaali: 2 solttua kuninkaan edessä, viistosti sivulle 1 vapaa ruutu?
+            }
+        }
         return v;
     }
     
     private double preProcessRook(int color, int ax, int ay) {
-        double v = 500;
+        double v = PVrook;
         addControlsHorizontalVertical(color, ax, ay);
         return v;
     }
 
     private double preProcessQueen(int color, int ax, int ay) {
-        double v = 900;
+        double v = PVqueen;
         addControlsHorizontalVertical(color, ax, ay);
         addControlsDiagonal(color, ax, ay);
         return v;
     }
     
     private double preProcessKnight(int color, int ax, int ay) {
-        double v = 300;
+        double v = PVknight;
         for (Square move : knightMoveLists[ax][ay]) {
             int x = move.x;
             int y = move.y;
@@ -216,8 +312,28 @@ public class YourEvaluator extends Evaluator {
     }
 
     private double preProcessPawn(int color, int ax, int ay) {
-        // add to pawns list
-        return 100;
+        pawns[color].add(new Square(ax, ay));
+        return PVpawn;
+    }
+    
+    //TODO: Mieti solttujen pisteytys uusiks! Ainakin upgrade incentive
+    // progressiiviseks endgame-editymisen mukaan sen taulukon avulla
+    //Non-connectaavista soltuista penaltyä?
+    
+    /** Endgame incentive to upgrade pawns + penalty for same lane pawns. */
+    private double postProcessPawns(int color) {
+        double v = 0;
+        if (endgame) {
+            for (Square pawn : pawns[color]) {
+                v += pawnUpgradePotentialBonus[color][pawn.y];
+            }
+        }
+        boolean[] laneAlreadyHasAPawn = new boolean[6];
+        for (Square pawn : pawns[color]) {
+            if (laneAlreadyHasAPawn[pawn.x]) v -= 30;
+            laneAlreadyHasAPawn[pawn.x] = true;
+        }
+        return v;
     }
 
     
@@ -298,19 +414,6 @@ public class YourEvaluator extends Evaluator {
         }
     }
 
-    private void generateKingWithPawnsBonus(boolean endgame) {
-        kingWithPawnsBonus = new int[9];
-        if (endgame) {
-            
-        } else {
-            //kingWithPawnsBonus[0] = 0;
-            kingWithPawnsBonus[1] = 30;
-            kingWithPawnsBonus[2] = 45;
-            for (int i=3; i<=8; i++) kingWithPawnsBonus[i] = 50;
-        }
-    }
-
-
     private void generateKingEscapeRoutesBonus() {
         kingEscapeRoutesBonus = new int[8];
         //kingEscapeRoutesBonus[0] = 0;
@@ -320,8 +423,53 @@ public class YourEvaluator extends Evaluator {
     }
     
     private void generateControlBonus() {
-        controlBonus = new int[2][6][6];
-        //TODO: päätä miten päin boardi on
+        controlBonus = new double[2][6][6];
+        for (int x=0; x<=5; x++) controlBonus[WHITE][0][x] = 1;
+        for (int x=0; x<=5; x++) controlBonus[WHITE][1][x] = 1.05;
+        for (int x=0; x<=5; x++) controlBonus[WHITE][2][x] = 1.1;
+        for (int x=0; x<=5; x++) controlBonus[WHITE][3][x] = 1.2;
+        for (int x=0; x<=5; x++) controlBonus[WHITE][4][x] = 1.2;
+        for (int x=0; x<=5; x++) controlBonus[WHITE][5][x] = 1.15;
+        for (int x=0; x<=5; x++) controlBonus[BLACK][5][x] = 1;
+        for (int x=0; x<=5; x++) controlBonus[BLACK][4][x] = 1.05;
+        for (int x=0; x<=5; x++) controlBonus[BLACK][3][x] = 1.1;
+        for (int x=0; x<=5; x++) controlBonus[BLACK][2][x] = 1.2;
+        for (int x=0; x<=5; x++) controlBonus[BLACK][1][x] = 1.2;
+        for (int x=0; x<=5; x++) controlBonus[BLACK][0][x] = 1.15;
+        // Keskustabonukset
+        controlBonus[WHITE][2][2] += 0.2;
+        controlBonus[WHITE][3][2] += 0.2;
+        controlBonus[WHITE][3][3] += 0.2;
+        controlBonus[WHITE][2][3] += 0.2;
+        controlBonus[BLACK][2][2] += 0.2;
+        controlBonus[BLACK][3][2] += 0.2;
+        controlBonus[BLACK][3][3] += 0.2;
+        controlBonus[BLACK][2][3] += 0.2;
+        // Suburb bonukset
+        controlBonus[WHITE][1][1] += 0.1;
+        controlBonus[WHITE][1][2] += 0.1;
+        controlBonus[WHITE][1][3] += 0.1;
+        controlBonus[WHITE][1][4] += 0.1;
+        controlBonus[WHITE][2][4] += 0.1;
+        controlBonus[WHITE][3][4] += 0.1;
+        controlBonus[WHITE][4][4] += 0.1;
+        controlBonus[WHITE][4][3] += 0.1;
+        controlBonus[WHITE][4][2] += 0.1;
+        controlBonus[WHITE][4][1] += 0.1;
+        controlBonus[WHITE][3][1] += 0.1;
+        controlBonus[WHITE][2][1] += 0.1;
+        controlBonus[BLACK][1][1] += 0.1;
+        controlBonus[BLACK][1][2] += 0.1;
+        controlBonus[BLACK][1][3] += 0.1;
+        controlBonus[BLACK][1][4] += 0.1;
+        controlBonus[BLACK][2][4] += 0.1;
+        controlBonus[BLACK][3][4] += 0.1;
+        controlBonus[BLACK][4][4] += 0.1;
+        controlBonus[BLACK][4][3] += 0.1;
+        controlBonus[BLACK][4][2] += 0.1;
+        controlBonus[BLACK][4][1] += 0.1;
+        controlBonus[BLACK][3][1] += 0.1;
+        controlBonus[BLACK][2][1] += 0.1;
     }
 
     private void generateKnightMoveLists() {
@@ -348,14 +496,6 @@ public class YourEvaluator extends Evaluator {
                 knightMoveLists[x][y] = list;
             }
         }
-    }
-
-    private void generateRookMoveLists() {
-        
-    }
-
-    private void generateQueenMoveLists() {
-        
     }
     
     private void generatePieceValues() {
@@ -385,9 +525,15 @@ public class YourEvaluator extends Evaluator {
         
     }
 
-    private long hashPosition(Position p) {
-        // remember to consider whose turn it is, too
-        return new Random().nextLong(); //TODO:
+    private void generatePawnUpgradePotentialBonuses() {
+        pawnUpgradePotentialBonus = new double[2][6];
+        pawnUpgradePotentialBonus[WHITE][2] = 10;
+        pawnUpgradePotentialBonus[WHITE][3] = 40;
+        pawnUpgradePotentialBonus[WHITE][4] = 100;
+        
+        pawnUpgradePotentialBonus[BLACK][3] = 10;
+        pawnUpgradePotentialBonus[BLACK][2] = 40;
+        pawnUpgradePotentialBonus[BLACK][1] = 100;
     }
 
 
@@ -406,21 +552,4 @@ class Square {
     public String toString() {
         return "      x = " + x + " , y = " + y;
     }
-    
-    
-}
-
-class Move {
-    int x1;
-    int y1;
-    int x2;
-    int y2;
-
-    public Move(int x1, int y1, int x2, int y2) {
-        this.x1 = x1;
-        this.y1 = y1;
-        this.x2 = x2;
-        this.y2 = y2;
-    }
-    
 }
