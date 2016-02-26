@@ -8,9 +8,9 @@ public class MainFrame {
     public JFrame f;
     public BoardController c;
 
-    public MainFrame() {
+    public MainFrame(String mode) {
         f = new JFrame();
-        c = new BoardController();
+        c = new BoardController(mode);
         c.setBackground(Color.white);
         f.add(c);
         f.setVisible(true);

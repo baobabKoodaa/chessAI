@@ -1,6 +1,10 @@
 
 package GUI;
 
+import Evaluators.Evaluator;
+import Evaluators.YourEvaluator;
+import Framework.Main;
+import Framework.Position;
 import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -12,12 +16,18 @@ import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 
 public class BoardController extends JPanel implements ActionListener, MouseListener, MouseMotionListener
 {
+   public static final boolean DEBUG = true;
+    
+   public static final int BLACK = 0;
+   public static final int WHITE = 1; 
+    
    public boolean waitingMoveFromPlayer;
    public boolean drawSelectionAtLastClick;
    public int clickX;
@@ -34,80 +44,128 @@ public class BoardController extends JPanel implements ActionListener, MouseList
    boolean waitingForNextPosition;
    String flashNotice;
    String gameOver;
+   
+   YourEvaluator debugger;
+   YourEvaluator workhorse;
+   
+   int mode;
+   public static final int MANUAL_PLAY = 1;
+   public static final int BOT_DUEL = 2;
+   
+   boolean requestedMoveAlready;
     
-    public BoardController()
+    public BoardController(String arg)
     {
         addMouseListener(this);
         addMouseMotionListener(this);
+        
+        if (arg.equals("botDuel")) mode = BOT_DUEL;
+        if (arg.equals("manualPlay")) mode = MANUAL_PLAY;
+        
+        debugger = new YourEvaluator();
+        debugger.STATE = debugger.DEBUG;
+        workhorse = new YourEvaluator();
         
         sqSize = 50;
         topLeftX = 80;
         topLeftY = 30;
         
+        requestedMoveAlready = false;
+        
         positions = new ArrayList<>();
-        positions.add(genStartPosition());
-        currentPositionIndex = 0;
+        currentPositionIndex = -1;
+        pieces = genStartPosition();
+
         nextPosition();
         repaint();
+        
     }
     
     public String[][] genStartPosition() {
         // gen pawns
-        String[][] pieces = new String[6][6];
+        String[][] pos = new String[7][7];
+        pos[6][6] = "WHITE"; // turn
         for (int x=0; x<6; x++) {
-            pieces[x][1] = new String("bp");
-            pieces[x][4] = new String("wp");
+            pos[x][1] = new String("bp");
+            pos[x][4] = new String("wp");
         }
         // gen rooks
-        pieces[0][0] = new String("br");
-        pieces[5][0] = new String("br");
-        pieces[5][5] = new String("wr");
-        pieces[0][5] = new String("wr");
+        pos[0][0] = new String("br");
+        pos[5][0] = new String("br");
+        pos[5][5] = new String("wr");
+        pos[0][5] = new String("wr");
         // gen knights
-        pieces[1][0] = new String("bn");
-        pieces[4][0] = new String("bn");
-        pieces[4][5] = new String("wn");
-        pieces[1][5] = new String("wn");
+        pos[1][0] = new String("bn");
+        pos[4][0] = new String("bn");
+        pos[4][5] = new String("wn");
+        pos[1][5] = new String("wn");
         // gen queens
-        pieces[2][0] = new String("bq");
-        pieces[2][5] = new String("wq");
+        pos[2][0] = new String("bq");
+        pos[2][5] = new String("wq");
         // gen kings
-        pieces[3][0] = new String("bk");
-        pieces[3][5] = new String("wk");
-        return pieces;
+        pos[3][0] = new String("bk");
+        pos[3][5] = new String("wk");
+        return pos;
     }
     
     public void addNewPosition(String[][] p) {
         positions.add(flip(p));
         if (waitingForNextPosition) {
             waitingForNextPosition = false;
+            requestedMoveAlready = false;
             nextPosition();
             repaint();
         }
     }
     
     private String[][] flip(String[][] original) {
-        String[][] flipped = new String[6][6];
+        String[][] flipped = new String[7][7];
         for (int x=0; x<6; x++) {
             for (int y=0; y<6; y++) {
                 flipped[x][5-y] = original[x][y];
             }
         }
+        flipped[6][6] = original[6][6];
         return flipped;
     }
     
+    public void printEvaluationOfCurrentPosition() {
+        String[][] strGrid = flip(positions.get(currentPositionIndex));
+        Position p = Position.intoPosition(strGrid);
+        debugger.eval(p);
+    }
+    
+    private String[][] copy(String[][] original) {
+        String[][] copy = new String[original.length][original[0].length];
+        for (int y=0; y<copy.length; y++) {
+            for (int x=0; x<copy[0].length; x++) {
+                copy[x][y] = original[x][y];
+            }
+        }
+        return copy;
+    }
+    
     public void nextPosition() {
-        if (currentPositionIndex < positions.size()-1) {
-            pieces = positions.get(++currentPositionIndex);
+        if (positions.size() > 0 && currentPositionIndex < positions.size()-1) {
+            pieces = copy(positions.get(++currentPositionIndex));
+            if (DEBUG) printEvaluationOfCurrentPosition();
         } else {
-            flashNotice = "Waiting for next move..";
+            if (mode == BOT_DUEL) flashNotice = "Waiting for next move from computer..";
+            if (mode == MANUAL_PLAY) System.out.println("Waiting for next move from computer..");
             if (gameOver != null) flashNotice = gameOver;
             waitingForNextPosition = true;
+            if (mode == MANUAL_PLAY && !requestedMoveAlready && currentPositionIndex >= 0) {
+                requestedMoveAlready = true;
+                String[][] strGrid = flip(positions.get(currentPositionIndex));
+                Position p = Position.intoPosition(strGrid);
+                Main.requestMove(workhorse, p);
+            }
         }
     }
     public void prevPosition() {
         if (currentPositionIndex >= 1) {
-            pieces = positions.get(--currentPositionIndex);
+            pieces = copy(positions.get(--currentPositionIndex));
+            if (DEBUG) printEvaluationOfCurrentPosition();
         } else {
             flashNotice = "Already at starting position!";
         }
@@ -178,31 +236,49 @@ public class BoardController extends JPanel implements ActionListener, MouseList
         int prevY = clickY;
         clickX = e.getX();
         clickY = e.getY();
-        if (waitingMoveFromPlayer) {
+        if (mode == MANUAL_PLAY) {
             int a = (prevX - topLeftX) / sqSize;
             int b = (prevY - topLeftY) / sqSize;
             int i = (clickX - topLeftX) / sqSize;
             int j = (clickY - topLeftY) / sqSize;
             if (!targetingSameSquare(a,b,i,j)) {
-                if (insideChessGrid(a,b,i,j)) {
+                if (insideChessGrid(a,b,i,j)) {                    
+                    /** Erase future from the previous timeline, if there was any */
+                    while (positions.size() > currentPositionIndex+1) {
+                        positions.remove(currentPositionIndex+1);
+                    }
+                    /** Update position */
                     pieces[i][j] = pieces[a][b];
                     pieces[a][b] = null;
+                    pieces[6][6] = (pieces[6][6].equals("WHITE") ? "BLACK" : "WHITE");
+                    
+                    /** Save new position */
+                    positions.add(copy(pieces));
+                    nextPosition();
+                    
                     clickX = 0;
                     clickY = 0;
                     drawSelectionAtLastClick = false;
                 } else if (insideChessGrid(i,j)) {
                     drawSelectionAtLastClick = true;
                 }
-            } else {
-                drawSelectionAtLastClick = (drawSelectionAtLastClick == true ? false : true);
+            } else if (insideChessGrid(a,b,i,j)) {
+                if (!drawSelectionAtLastClick) drawSelectionAtLastClick = true;
+                else {
+                    drawSelectionAtLastClick = false;
+                    clickX = 1;
+                    clickY = 1;
+                }
             }
         }
-        if (clickY > 346 && clickY < 424) {
+            
+        if (clickY > 340 && clickY < 424) {
             if (clickX < 234 && clickX > 126) {
                 prevPosition();
             } else if (clickX > 234 && clickX < 339) {
                 nextPosition();
             }
+
         }
         
         repaint();

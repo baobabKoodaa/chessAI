@@ -1,13 +1,17 @@
+package Framework;
+
+import Evaluators.*;
 import GUI.MainFrame;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Vector;
+
 public class Main {
 	
 	static Evaluator ce; // current evaluator
 	static Evaluator oe; // our evaluator
 	static Evaluator ye; // your evaluator
-	
+        static MainFrame frame;
 	
 	class PositionComparator implements Comparator<Position> {
 		public int compare(Position p1, Position p2) {
@@ -15,9 +19,16 @@ public class Main {
 		}
 	}
         
+        public static void main(String[] args) {
+                eternityBotDuel();
+                manualPlay();
+        }
+        
         static double eval(Position p) {
-            if (!Double.isNaN(p.cachedResult))
+            if (!Double.isNaN(p.cachedResult)) {
                 return p.cachedResult;
+            }
+                
             double d = 0.0;
             if (ce == ye)
                 d = ce.eval(p);
@@ -35,7 +46,9 @@ public class Main {
 	    if (p.winner == -1) return -1E10-depth; // prefer to win sooner
 	    if (p.winner == +1) return +1E10+depth; // and lose later
 				    
-		if(depth == 0) return ce.eval(p);
+		if(depth == 0) {
+                    return ce.eval(p);
+                }
 		Vector<Position> P = p.getNextPositions();
 		Collections.sort(P, (new Main()).new PositionComparator());
 		if(player == 0) Collections.reverse(P);
@@ -60,46 +73,82 @@ public class Main {
 		double alpha = -Double.MAX_VALUE, beta = Double.MAX_VALUE;
 		return alphabeta(p,depth,alpha,beta,player);
 	}
-	
-	public static void main(String[] args) {
-                MainFrame frame = new MainFrame();
-                
-		//oe = new OurEvaluator(); // <-- defaultAI
-		//ye = new YourEvaluator();
-                
-                oe = new OurEvaluator(); // <-- defaultAI
-                ye = new YourEvaluator();
-                //ye = new FoodChainV1plusHash();
-		
-		int depth = 5;
-		
+        
+        public static void manualPlay() {
+                frame = new MainFrame("manualPlay");
+                Position p = new Position();
+                p.setStartingPosition();
+                p.addPositionToGUIpositionList(frame.c);
+        }
+        
+        public static void requestMove(Evaluator evaluator, Position p) {
+            ce = evaluator;
+            Vector<Position> P = p.getNextPositions();
+            int depth = 5;
+            if(p.winner == +1) {
+                    System.out.println("White won.");
+                    frame.c.gameOver("White won.");
+                    return;
+            } 
 
-                
+            if(p.winner == -1) {
+                    System.out.println("Black won.");
+                    frame.c.gameOver("Black won.");
+                    return;
+            }
+
+            if(P.size() == 0) {
+                    System.out.println("No more available moves");
+                    frame.c.gameOver("No more available moves");
+                    return;
+            }
+
+            Position bestPosition = new Position();
+            if(p.whiteToMove) {
+                    double max = -1./0.;
+                    for(int i = 0; i < P.size(); ++i) {
+                            double val = minmax(P.elementAt(i),depth,1);
+                            if(max < val) {
+                                    bestPosition = P.elementAt(i);
+                                    max = val;
+                            }
+                    }
+            } else {
+                    double min = 1./0.;
+                    for(int i = 0; i < P.size(); ++i) {
+                            double val = minmax(P.elementAt(i),depth,0);
+                            if(min > val) {
+                                    bestPosition = P.elementAt(i);
+                                    min = val;
+                            }
+                    }
+            }
+            assert p.whiteToMove != bestPosition.whiteToMove;
+            p = bestPosition;
+            p.addPositionToGUIpositionList(frame.c);
+        }
+        
+        public static void eternityBotDuel() {
+                frame = new MainFrame("botDuel");
+		int depth = 5;
                 double whiteTimeTotal = 0;
                 double blackTimeTotal = 0;
                 int whiteWins = 0;
                 int blackWins = 0;
                 int ties = 0;
-		
-		
-		
-
-		
                 while (true) {
+                    oe = new DecompiledOurEvaluator();
+                    ye = new YourEvaluator();
                     
                     Position p = new Position();
                     p.setStartingPosition();
-                    p.print(frame.c);
+                    p.addPositionToGUIpositionList(frame.c);
                     oe.eval(p);
                     
                     long ms = System.currentTimeMillis();
                     int moveNumber = 0;
-                    for (; moveNumber < 200; moveNumber++) {
-                            ce = oe;
-                            ce = ye;
+                    for (; moveNumber < 300; moveNumber++) {
                             Vector<Position> P = p.getNextPositions();
-
-                            double evaluation = (new OurEvaluator()).eval(p);
 
                             if(p.winner == +1) {
                                     System.out.println("White won.");
@@ -147,7 +196,7 @@ public class Main {
 
                             assert p.whiteToMove != bestPosition.whiteToMove;
                             p = bestPosition;
-                            p.print(frame.c);
+                            p.addPositionToGUIpositionList(frame.c);
 
                             long curtime = System.currentTimeMillis();
 
@@ -161,8 +210,8 @@ public class Main {
                             //System.out.println("     Overall white has spent " + whiteTimeTotal + "s, black has spent " + blackTimeTotal + "s");
                             ms = curtime;
                     }
-                    if (moveNumber == 200) {
-                        System.out.println("TIE - after 200 moves");
+                    if (moveNumber == 300) {
+                        System.out.println("TIE - after 300 moves");
                         ties++;
                     }
                     System.out.println("Tally :: WHITE " + whiteWins + " :: BLACK " + blackWins + " :: TIES " + ties);

@@ -1,34 +1,30 @@
+package Evaluators;
+
+
+import Framework.Position;
+import Evaluators.Evaluator;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 
-public class FoodChainV2Hash extends Evaluator {
+/** Feb 10 version, pretty much the 1st version submitted. */
+
+public class FoodChainV1 extends Evaluator {
     
     public static final int BLACK = 0;
     public static final int WHITE = 1;
-    
-    public static final double PVrook = 500;
-    public static final double PVknight = 300;
-    public static final double PVqueen = 900;
-    public static final double PVpawn = 100;
-    
 
     // Position specific
     int turn; // BLACK or WHITE
     boolean endgame;
     int pieceCount;
-    int[] pieceValues;
     int[][] b;
     Double[][][] relativeSqValue;
     Square[] kingLives;
     int[][][] control;
     List<Square>[] pawns;
-    
-    // Cleared at each eval call, modified inside minimax search within the check/capture tree
-    HashMap<Long, Double> evaluatedPositions;
-    HashMap<Long, int[][]> collisionChecker;
     
     // Set once or twice during a match
     int[] kingEscapeRoutesBonus;
@@ -40,16 +36,8 @@ public class FoodChainV2Hash extends Evaluator {
     Double[][] pieceValue;
     List<Square>[][] neighboringSquares;
     List<Square>[][] knightMoveLists;
-    Random rng;
     
-    // Statistic collection variables
-    public long countFoundHash;
-    public long countNotFoundHash;
-    
-    public FoodChainV2Hash() {
-        evaluatedPositions = new HashMap<>();
-        collisionChecker = new HashMap<>();
-        rng = new Random();
+    public FoodChainV1() {
         endgame = false;
         enemyControlNearKingPenalty = 10;
         generatePawnUpgradePotentialBonuses();
@@ -58,30 +46,19 @@ public class FoodChainV2Hash extends Evaluator {
         generateKingEscapeRoutesBonus();
         generateControlBonus();
         generatePieceValues();
-        
-        // statistics
-        countFoundHash = 0;
-        countNotFoundHash = 0;
     }
     
     public double eval(Position p) {
-        //if (rng.nextInt(10000) == 0) System.out.println("Hash table size " + evaluatedPositions.size() + " has helped " + (countFoundHash * 1.0 / (countNotFoundHash+countFoundHash)));
         return ev(p);
     }
     
     public double ev(Position p) {
         b = p.board;
-        long thisPositionHash = hashPosition(p);
-        if (evaluatedPositions.containsKey(thisPositionHash)) {
-            countFoundHash++;
-            //return evaluatedPositions.get(thisPositionHash);
-        } else countNotFoundHash++;
-        
+        relativeSqValue = new Double[2][6][6];
+        double v = 0;
         
         // initialize position specific static variables
-        relativeSqValue = new Double[2][6][6];
         pieceCount = 36; // deduct empty squares to reach actual piececount
-        pieceValues = new int[2];
         kingLives = new Square[2];
         control = new int[2][6][6];
         pawns = new ArrayList[2];
@@ -89,13 +66,8 @@ public class FoodChainV2Hash extends Evaluator {
         pawns[WHITE] = new ArrayList<Square>(6);
         turn = (p.whiteToMove ? WHITE : BLACK);
         
-        //TODO: taulukko josta pelin vaiheen (pieceCount) ja yksikön tyypin (heppa) mukaan
-        // pisteytys ruudulle jossa yksikkö on: v += t[BLACK][heppa][pieceCount][x][y]
-        
-        double v = 0;
-
-        for (int x = 0; x < b.length; x++) {
-            for (int y = 0; y < b[x].length; y++) {
+        for (int x = 0; x < b.length; ++x) {
+            for (int y = 0; y < b[x].length; ++y) {
                 v += preProcessSquare(x,y);
             }
         }
@@ -105,11 +77,6 @@ public class FoodChainV2Hash extends Evaluator {
             endgame = true;
             enemyControlNearKingPenalty = 0; // king becomes a playah!
         }
-        
-        //TODO: if (endGame == true && pieceCount > 13)
-        
-        
-        //double v = pieceValues[WHITE] - pieceValues[BLACK] + pieceValueDiffBonus;
         v += postProcessKing(WHITE, kingLives[WHITE]);
         v -= postProcessKing(BLACK, kingLives[BLACK]);
         v += postProcessPawns(WHITE);
@@ -120,75 +87,12 @@ public class FoodChainV2Hash extends Evaluator {
                 // control = lkm uhkauksia ruutuun
                 // relativeSqVal = ruudussa olevan uhkauksen/suojauksen arvo
                 // controlBonus = ruudun arvo sijainnin mukaan, keskeltä/vihun päästä isompi arvo
-
                 v += control[WHITE][x][y] * relativeSqValue[WHITE][x][y] * controlBonus[WHITE][x][y];
                 v -= control[BLACK][x][y] * relativeSqValue[BLACK][x][y] * controlBonus[BLACK][x][y];
             }
         }
         
-        
-        //TODO: nappuloiden suhteelliset arvot; häviöllä oleva ei halua vaihtokauppoja!
-        //  (endgames ei toimi ihan niin:
-        //     jos esim. solttu+heppa vs. solttu jäljellä -> soltut vaihtoon -> tasuri)
-        
-        //TODO: pisteytys jäljellä olevien siirtojen lkm!
-        //TODO: huom: blocked by chessmate! sillai blokatun yksikön arvo -50%?
-        
-        //TODO: Square-luokka pois!
-        
-        // Oisko naiivi capturesequence arviointi parempi kuin uus minmax?
-        // Riippuen löytyykö huomattavaa eroa nappuloiden arvossa jossain capturesequencin
-        // "päätöshaarassa", voitais joko arvioida se päätöshaara tai tämä mistä lähdettiin haarautumaan.
-        // Tuleeko tässä ongelmia shakituksen kanssa?
-        
-        // Minimax into the capture/check tree, return min/max (depending on whose turn it is now)
-        // of *exactly which positions??* from the tree. Consider null moves..?
-        
-        //TODO: MonteCarlo-simulointi oikeiden taikalukujen löytämiseksi annetuista rangeista?
-        
-        //Uncomment this in production
-        //v += rng.nextInt(10);
-        
-//        if (evaluatedPositions.containsKey(thisPositionHash)) {
-//            if (v != evaluatedPositions.get(thisPositionHash)) {
-//                System.out.println("Mismatch");
-//            }
-//        }
-//        
-        evaluatedPositions.put(thisPositionHash, v);
         return v;
-    }
-    
-    public long hashPosition(Position p) {
-        long hash = (p.whiteToMove ? 2 : 1); // !
-        long A = 31L;
-        for (int y=0; y<6; y++) {
-            for (int x=0; x<6; x++) {
-                hash *= A; // modulates by long overflow
-                hash += (b[x][y]+1);
-            }
-        }
-        hash *= A;
-        
-        // Collision checker, remove from production
-//        int[][] board = new int[6][6];
-//        for (int y=0; y<6; y++) {
-//            for (int x=0; x<6; x++) {
-//                board[x][y] = b[x][y];
-//            }
-//        }
-//        if (collisionChecker.containsKey(hash)) {
-//            int[][] other = collisionChecker.get(hash);
-//            for (int y=0; y<6; y++) {
-//                for (int x=0; x<6; x++) {
-//                    if (board[x][y] != other[x][y]) System.out.println("Collision!");
-//                    //else System.out.println("ok");
-//                }
-//            }
-//        }
-//        collisionChecker.put(hash, board);
-        
-        return hash;
     }
     
     public double preProcessSquare(int x, int y) {
@@ -230,7 +134,6 @@ public class FoodChainV2Hash extends Evaluator {
             int y = neighbor.y;
             control[color][x][y]++;
             //TODO: Jos uhataan vihun nappia @x,y && vihulla ei controllia siihen ruutuun -> lisätään capturemoveseihin
-            //TODO: Jos kuninkaalla ei laillisia siirtoja, penalty!
             switch (color) {
                 case BLACK:
                     
@@ -276,32 +179,26 @@ public class FoodChainV2Hash extends Evaluator {
         if (endgame) {
             // halutaan turvata solttujen nostamista
         } else {
-            if (ay != 5 && ay != 0) {
-                v -= 10; // penalty kuningas ei päädyssä
-            } else {
-                //TODO: escaperoutes tehokkaammin tähän lohkoon
-                // tähän samalla myös "solttukilvestä" bonusta?
-                // ideaali: 2 solttua kuninkaan edessä, viistosti sivulle 1 vapaa ruutu?
-            }
+            if (ay != 5 && ay != 0) v -= 10; // pidetään kuningas päädyssä
         }
         return v;
     }
     
     private double preProcessRook(int color, int ax, int ay) {
-        double v = PVrook;
+        double v = 500;
         addControlsHorizontalVertical(color, ax, ay);
         return v;
     }
 
     private double preProcessQueen(int color, int ax, int ay) {
-        double v = PVqueen;
+        double v = 900;
         addControlsHorizontalVertical(color, ax, ay);
         addControlsDiagonal(color, ax, ay);
         return v;
     }
     
     private double preProcessKnight(int color, int ax, int ay) {
-        double v = PVknight;
+        double v = 300;
         for (Square move : knightMoveLists[ax][ay]) {
             int x = move.x;
             int y = move.y;
@@ -312,12 +209,8 @@ public class FoodChainV2Hash extends Evaluator {
 
     private double preProcessPawn(int color, int ax, int ay) {
         pawns[color].add(new Square(ax, ay));
-        return PVpawn;
+        return 100;
     }
-    
-    //TODO: Mieti solttujen pisteytys uusiks! Ainakin upgrade incentive
-    // progressiiviseks endgame-editymisen mukaan sen taulukon avulla
-    //Non-connectaavista soltuista penaltyä?
     
     /** Endgame incentive to upgrade pawns + penalty for same lane pawns. */
     private double postProcessPawns(int color) {
@@ -329,7 +222,7 @@ public class FoodChainV2Hash extends Evaluator {
         }
         boolean[] laneAlreadyHasAPawn = new boolean[6];
         for (Square pawn : pawns[color]) {
-            if (laneAlreadyHasAPawn[pawn.x]) v -= 30;
+            if (laneAlreadyHasAPawn[pawn.x]) v-= 30;
             laneAlreadyHasAPawn[pawn.x] = true;
         }
         return v;
@@ -524,6 +417,11 @@ public class FoodChainV2Hash extends Evaluator {
         
     }
 
+    private long hashPosition(Position p) {
+        // remember to consider whose turn it is, too
+        return new Random().nextLong(); //TODO:
+    }
+
     private void generatePawnUpgradePotentialBonuses() {
         pawnUpgradePotentialBonus = new double[2][6];
         pawnUpgradePotentialBonus[WHITE][2] = 10;
@@ -534,8 +432,8 @@ public class FoodChainV2Hash extends Evaluator {
         pawnUpgradePotentialBonus[BLACK][2] = 40;
         pawnUpgradePotentialBonus[BLACK][1] = 100;
     }
-
-    private class Square {
+    
+    class Square {
         int x;
         int y;
 
@@ -548,5 +446,9 @@ public class FoodChainV2Hash extends Evaluator {
         public String toString() {
             return "      x = " + x + " , y = " + y;
         }
+
     }
+
+
 }
+

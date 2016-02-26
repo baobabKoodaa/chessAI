@@ -1,29 +1,33 @@
+package Framework;
+
 import GUI.BoardController;
 import java.util.Vector;
 
 public class Position {
-        int board [][];
-	boolean whiteToMove;
+
+    
+        public int board [][];
+	public boolean whiteToMove;
         public double cachedResult;
-    int winner = 0; // white = +1, black = -1
+        public int winner = 0; // white = +1, black = -1
 	
-    final static int bRows = 6;
-    final static int bCols = 6;
+        public final static int bRows = 6;
+        public final static int bCols = 6;
 
 
-	final static int Empty = 0;
-	final static int WKing = 1;
-	final static int WQueen = 2;
-	final static int WRook = 3;
-	final static int WBishop = 4;
-	final static int WKnight = 5;
-	final static int WPawn = 6;
-	final static int BKing = 7;
-	final static int BQueen = 8;
-	final static int BRook = 9;
-	final static int BBishop = 10;
-	final static int BKnight = 11;
-	final static int BPawn = 12;
+	public final static int Empty = 0;
+	public final static int WKing = 1;
+	public final static int WQueen = 2;
+	public final static int WRook = 3;
+	public final static int WBishop = 4;
+	public final static int WKnight = 5;
+	public final static int WPawn = 6;
+	public final static int BKing = 7;
+	public final static int BQueen = 8;
+	public final static int BRook = 9;
+	public final static int BBishop = 10;
+	public final static int BKnight = 11;
+	public final static int BPawn = 12;
 	
     	final int Nx [] = {-2,-2,-1,-1,1,1,2,2};
     	final int Ny [] = {1,-1,2,-2,2,-2,1,-1};
@@ -72,7 +76,7 @@ public class Position {
 		this.whiteToMove = !p.whiteToMove;
 	}
         
-        Position mirror() {
+        public Position mirror() {
             Position p = new Position();
             for (int i = 0; i < this.board.length; ++i) {
                 for (int j = 0; j < this.board[i].length; ++j) {
@@ -84,10 +88,52 @@ public class Position {
             p.whiteToMove = !this.whiteToMove;
             return p;
         }
+        
+        public static Position intoPosition(String[][] strGrid) {
+            Position p = new Position();
+            for (int x=0; x<6; x++) {
+                for (int y=0; y<6; y++) {
+                    if (strGrid[x][y] == null || strGrid[x][y].isEmpty()) p.board[x][y] = Empty;
+                    else if (strGrid[x][y].equals("wk")) p.board[x][y] = WKing;
+                    else if (strGrid[x][y].equals("wq")) p.board[x][y] = WQueen;
+                    else if (strGrid[x][y].equals("wr")) p.board[x][y] = WRook;
+                    else if (strGrid[x][y].equals("wn")) p.board[x][y] = WKnight;
+                    else if (strGrid[x][y].equals("wp")) p.board[x][y] = WPawn;
+                    else if (strGrid[x][y].equals("bk")) p.board[x][y] = BKing;
+                    else if (strGrid[x][y].equals("bq")) p.board[x][y] = BQueen;
+                    else if (strGrid[x][y].equals("br")) p.board[x][y] = BRook;
+                    else if (strGrid[x][y].equals("bn")) p.board[x][y] = BKnight;
+                    else if (strGrid[x][y].equals("bp")) p.board[x][y] = BPawn;
+                }
+            }
+            p.whiteToMove = (strGrid[6][6].equals("WHITE"));
+            return p;
+        }
+        
+        public void print() {
+		for(int y = bRows-1; y >= 0; --y) {
+			for(int x = 0; x < bCols; ++x) {
+				int v = this.board[x][y];
+				if(v == Empty) System.out.print(".");
+				if(v == WKing) System.out.print("k");
+				if(v == WQueen) System.out.print("q");
+				if(v == WRook) System.out.print("r");
+				if(v == WBishop) System.out.print("b");
+				if(v == WKnight) System.out.print("n");
+				if(v == WPawn) System.out.print("p");
+				if(v == BKing) System.out.print("K");
+				if(v == BQueen) System.out.print("Q");
+				if(v == BRook) System.out.print("R");
+				if(v == BBishop) System.out.print("B");
+				if(v == BKnight) System.out.print("N");
+				if(v == BPawn) System.out.print("P");
+			}
+			System.out.println();
+		}
+	}
 	
-	public void print(BoardController c) {
-                // print to GUI
-                String[][] b = new String[6][6];
+	public void addPositionToGUIpositionList(BoardController c) {
+                String[][] b = new String[7][7];
 		for(int y = bRows-1; y >= 0; --y) {
 			for(int x = 0; x < bCols; ++x) {
                                 int v = this.board[x][y];
@@ -104,6 +150,7 @@ public class Position {
 				if(v == BPawn)      b[x][y] = "bp";
                         }
                 }
+                b[6][6] = (whiteToMove ? "WHITE" : "BLACK");
                 c.addNewPosition(b);
 	}
 	
