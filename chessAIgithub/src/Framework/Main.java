@@ -2,8 +2,11 @@ package Framework;
 
 import Evaluators.*;
 import GUI.MainFrame;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Vector;
 
 public class Main {
@@ -136,9 +139,30 @@ public class Main {
                 int whiteWins = 0;
                 int blackWins = 0;
                 int ties = 0;
+                
+                
+                int whichWeight = -1;
+                ArrayList<Double> options = new ArrayList<>();
+                options.add(1.0);
+                Double[] weights = options.toArray(new Double[options.size()]);
+                
+                int[] winsAtDiffWeights = new int[weights.length];
+                int[] tiesAtDiffWeights = new int[weights.length];
+                int[] lossesAtDiffWeights = new int[weights.length];
+                
+                
                 while (true) {
-                    oe = new DecompiledOurEvaluator();
-                    ye = new YourEvaluator();
+                    ye = new CerberusV0();
+                    
+                    YourEvaluator currentPhalanx = new YourEvaluator();
+                    whichWeight = (whichWeight+1)%weights.length;
+                    double weight = weights[whichWeight];
+                    currentPhalanx.reWeightPST(weight);
+                    oe = currentPhalanx;
+                    
+                    
+                    
+                    
                     
                     Position p = new Position();
                     p.setStartingPosition();
@@ -147,13 +171,14 @@ public class Main {
                     
                     long ms = System.currentTimeMillis();
                     int moveNumber = 0;
-                    for (; moveNumber < 300; moveNumber++) {
+                    for (; moveNumber < 150; moveNumber++) {
                             Vector<Position> P = p.getNextPositions();
 
                             if(p.winner == +1) {
                                     System.out.println("White won.");
                                     frame.c.gameOver("White won.");
                                     whiteWins++;
+                                    winsAtDiffWeights[whichWeight]++;
                                     break;
                             } 
 
@@ -161,12 +186,14 @@ public class Main {
                                     System.out.println("Black won.");
                                     frame.c.gameOver("Black won.");
                                     blackWins++;
+                                    lossesAtDiffWeights[whichWeight]++;
                                     break;
                             }
 
                             if(P.size() == 0) {
                                     System.out.println("No more available moves");
                                     frame.c.gameOver("No more available moves");
+                                    tiesAtDiffWeights[whichWeight]++;
                                     ties++;
                                     break;
                             }
@@ -210,12 +237,19 @@ public class Main {
                             //System.out.println("     Overall white has spent " + whiteTimeTotal + "s, black has spent " + blackTimeTotal + "s");
                             ms = curtime;
                     }
-                    if (moveNumber == 300) {
-                        System.out.println("TIE - after 300 moves");
+                    if (moveNumber == 150) {
+                        System.out.println("TIE - after 150 moves");
+                        tiesAtDiffWeights[whichWeight]++;
                         ties++;
                     }
+                    currentPhalanx.clearHash();
                     System.out.println("Tally :: WHITE " + whiteWins + " :: BLACK " + blackWins + " :: TIES " + ties);
                     System.out.println("Time :: white " + whiteTimeTotal + " :: black " + blackTimeTotal);
+                    System.out.println("***************************************");
+                    System.out.println("WEIGHTS: " + Arrays.toString(weights));
+                    System.out.println("WINS:    " + Arrays.toString(winsAtDiffWeights));
+                    System.out.println("LOSSES:  " + Arrays.toString(lossesAtDiffWeights));
+                    System.out.println("TIES:    " + Arrays.toString(tiesAtDiffWeights));
                 }
                 
 	}

@@ -12,14 +12,36 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Random;
-import org.omg.CORBA.INTERNAL;
+
+
+
+
+
+
+
+
+
+
+    /* CODENAME:PHALANX */
+
+    /* WAY, WAY UNFINISHED. EMBARRASSING. */
+
+
+
+
+
+
+
+
+
+
 
 public class BlackMagicV2 extends Evaluator {
     
     public static final int DEV = 1;
     public static final int PRODUCTION = 2;
     public static final int DEBUG = 3;
-    public int STATE = DEV; // MUUTA STATIC FINAL INTIKS PRODUCTIONIIN KÄÄNTÄJÄOPTIMOINTIA VARTEN
+    public static final int STATE = PRODUCTION;
     
     public static final int BLACK = 0;
     public static final int WHITE = 1;
@@ -44,7 +66,6 @@ public class BlackMagicV2 extends Evaluator {
     public static final double CAPTURITY_BONUS = 0.02;
     
     HashMap<Long, Double> evaluatedPositions;
-    int livelockDetector;
     Random rng;
 
     // Position specific
@@ -64,8 +85,6 @@ public class BlackMagicV2 extends Evaluator {
     int[] pawns;
     
     // Set once
-    boolean weKnowOurTrueColor;
-    int ourTrueColor;
     double[] material;
     double[][][][][] pst;
     double[][] kingPawnShieldBonus;
@@ -83,8 +102,6 @@ public class BlackMagicV2 extends Evaluator {
     
     public BlackMagicV2() {
         evaluatedPositions = new HashMap<>();
-        livelockDetector = 0;
-        ourTrueColor = WHITE; // check this assumption the first time eval is called
         rng = new Random();
         generateTrivialLookupTables();
         generateEnemyControlNearKingPenalty();
@@ -96,33 +113,12 @@ public class BlackMagicV2 extends Evaluator {
     }
     
     public double eval(Position p) {
-         /* Main is coded so that when black's position is being evaluated,
-          * all white pieces are turned black & vice versa. This means that
-          * the position object we are given actually contains NO INFORMATION
-          * regarding which side of the board is able to promote our pawns.
-          * We bypass this problem by deducing our color from the board 
-          * position we are first asked to evaluate; we presume that if any
-          * of our "white pawns" are on row 4 around game start, then we are
-          * actually black, so for the remainder of this Evaluator object's
-          * life it's going to "mirror back" the piece colors... */
-        if (STATE == PRODUCTION && !weKnowOurTrueColor) {
-            boolean loydettySolttuRivilta4 = false;
-            for (int x=0; x<6; x++) {
-                if (p.board[x][4] == Position.WPawn) loydettySolttuRivilta4 = true;
-            }
-            ourTrueColor = (loydettySolttuRivilta4 ? BLACK : WHITE);     
-            weKnowOurTrueColor = true;
-        }
-        if (ourTrueColor == BLACK) {
-            p = p.mirror();
-        }
-        
-        
         double v = ev(p);
         if (STATE == DEBUG) analyzeScores();
         if (STATE == PRODUCTION) v += 10 - rng.nextInt(20);
         return v;
     }
+    
     
     public double ev(Position p) {
         b = p.board;
@@ -140,21 +136,8 @@ public class BlackMagicV2 extends Evaluator {
         if (STATE != DEBUG) {
             Double v = evaluatedPositions.get(hash);
             if (v != null) {
-                livelockDetector++;
-                if (livelockDetector > 700) {
-                    /** Try to detect livelocks (moving same pieces back & forth)
-                      * If we are ahead, we should take risks to break out of livelocks 
-                      * If we are behind, we should take the draw */
-                    int canAffordToLose = (int) (ourTrueColor == BLACK ? -v/2 : v/2);
-                    if (canAffordToLose > 0) {
-                        int addedRandom = canAffordToLose - rng.nextInt(2*canAffordToLose);
-                        System.out.println("..added random " + addedRandom + " when ahead by " + canAffordToLose);
-                        v += addedRandom;
-                    }
-                }
-                //return v;
+                return v;
             }
-            livelockDetector = 0;
         }
         
         /* checkmate? */
@@ -193,24 +176,13 @@ public class BlackMagicV2 extends Evaluator {
         
         double v = score[WHITE] - score[BLACK];
         double ylivoimaKerroin = 1 + Math.abs(v) / (score[WHITE] + score[BLACK]);
-        v *= ylivoimaKerroin; //TODO: Mieti onko tää paras mahdollinen tapa toteuttaa tää juttu?
-                              // esim laske et tää toimii jollain vaihdolla ylivoimatilantees
+        v *= ylivoimaKerroin;
         
         if (STATE == DEBUG) {
             System.out.println("Original diff: " + (score[WHITE]-score[BLACK]) + ", modified diff: " + v);
         }
         
-        if (STATE == DEV) {
-            Double old = evaluatedPositions.get(hash);
-            if (old != null && old != v) {
-                System.out.println("Old hash " + old + ", new hash " + v);
-                throw new RuntimeException("HASH COLLISION");
-            }
-        }
-        
-        if (STATE != DEBUG) {
-            evaluatedPositions.put(hash, v);
-        }
+        evaluatedPositions.put(hash, v);
         return v;
     }
     

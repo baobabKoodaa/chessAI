@@ -20,6 +20,7 @@ public class YourEvaluator extends Evaluator {
     public static final int PRODUCTION = 2;
     public static final int DEBUG = 3;
     public int STATE = DEV; // MUUTA STATIC FINAL INTIKS PRODUCTIONIIN KÄÄNTÄJÄOPTIMOINTIA VARTEN
+    //public static final int STATE = PRODUCTION;
     
     public static final int BLACK = 0;
     public static final int WHITE = 1;
@@ -29,28 +30,26 @@ public class YourEvaluator extends Evaluator {
     public static final int KNIGHT = 5;
     public static final int PAWN = 6;
     
-    
-    public static final double PVqueen = 900;
-    public static final double PVking = 20000;
-    
-    public static final double COST_OF_TEMPO = 80; // eg. check
-    public static final double HOSTILE_PIN_BONUS = 40;
+    public static final double HOSTILE_PIN_BONUS = 30;
     public static final double IMMOBILIZED_KING_PENALTY = 10;
-    public static final double MOBILITY_BONUS = 10;
-    public static final double PROTECTION_BONUS = 1000;
     public static final double CAPTURITY_BONUS = 0.02;
-    public static final double PASSED_PAWN_BONUS = 100;
+    public static final double PASSED_PAWN_BONUS = 50;
     public static final double BLOCKED_PAWN_PENALTY = 25;
     public static final double ISOLATED_PAWN_PENALTY = 25; /* Per pawn */
     public static final double DOUBLED_PAWNS_PENALTY = 50; /* Per lane */
     
-    public static double[] PVpawnsTotal;
-    public static double[] PVpawn;
-    public static double[] PVknight;
-    public static double[] PVrook;
+    public double COST_OF_TEMPO = 60; // eg. check
+    public double PROTECTION_BONUS = 1000;
+    public double MOBILITY_BONUS = 10;
+    
+    public double PVqueen = 900;
+    public double PVking = 20000;
+    public double[] PVpawnsTotal;
+    public double[] PVpawn;
+    public double[] PVknight;
+    public double[] PVrook;
     
     HashMap<Long, Double> evaluatedPositions;
-    int livelockDetector;
     Random rng;
 
     // Position specific
@@ -78,59 +77,33 @@ public class YourEvaluator extends Evaluator {
     
     // Set once
     double[][][][][] pst;
-    double[][] kingPawnShieldBonus;
     double[][] enemyControlNearKingPenalty;
-    double[][] pawnUpgradePotentialBonus;
     boolean[][] isEnemyRookOrQueen;
     boolean[][] isFriendly;
     boolean[][] isEnemy;
-    Double[][] pieceValue;
     int[][][] neighboringSquares;
     int[][][] knightMoveLists;
-    
-    // Hack to discover our true color
-    boolean weKnowOurTrueColor;
-    int ourTrueColor;
-    int seenWhiteCount;
-    int seenBlackCount;
     
     // Debugging
     ScoreAnalyzer[] scoreAnalyzer;
     
     public YourEvaluator() {
-        evaluatedPositions = new HashMap<>();
-        livelockDetector = 0;
-        
-        ourTrueColor = WHITE;
-        weKnowOurTrueColor = false;
-        seenBlackCount = 0;
-        seenWhiteCount = 0;
-        
+        evaluatedPositions = new HashMap<>();        
         rng = new Random();
         generateTrivialLookupTables();
         generateEnemyControlNearKingPenalty();
-        generateKingPawnShieldBonus();
-        generatePawnUpgradePotentialBonuses();
         generateNeighboringSquaresLists();
         generateKnightMoveLists();
         generatePieceSquareTables();
+        /* Material value re-weighted relative to other goals (1.5 found by experimenting) */
+        reWeightMaterialScores(1.5);
+        /* Queen boosted 5x. Not entirely sure why this improves results, but
+         * it's probably related to promotion incentives. */
+        reWeightKQscores(5.0);
+        reWeightPST(0.5);
     }
     
-    public double eval(Position p) {
-        /* Hack to discover our true color */
-        if (!weKnowOurTrueColor) {
-            if (p.whiteToMove) seenWhiteCount++;
-            else seenBlackCount++;
-            if (seenWhiteCount + seenBlackCount > 50000) {
-                weKnowOurTrueColor = true; /* Guess, to be exact */
-                double ratio = seenBlackCount * 1.0 / (seenWhiteCount+seenBlackCount);
-                ourTrueColor = (ratio > 0.3 ? BLACK : WHITE);
-                
-                System.out.print("We have discovered we are " + (ourTrueColor == WHITE ? "WHITE" : "BLACK"));
-                System.out.println("  by " + seenBlackCount + " to " + seenWhiteCount + " = " + ratio);
-            }
-        }
-        
+    public double eval(Position p) {        
         double v = ev(p);
         if (STATE == DEBUG) analyzeScores();
         if (STATE == PRODUCTION) v += 10 - rng.nextInt(20);
@@ -151,20 +124,9 @@ public class YourEvaluator extends Evaluator {
         long hash = hashPosition(p);
         if (STATE != DEBUG) {
             Double v = evaluatedPositions.get(hash);
-            if (v != null) {
-                livelockDetector++;
-                if (livelockDetector > 700) {
-                    /** Try to detect livelocks (moving same pieces back & forth)
-                      * We won't be able to decipher if we are in the lead (up the tree)
-                      * but assume we are better than our opponent & it is in our
-                      * interest to take risks to win rather than take the tie */
-                    int affordToLose = 100;
-                    v += affordToLose - rng.nextInt(2 * affordToLose);
-                }
-                return v;
-            }
-            livelockDetector = 0;
+            //if (v != null) return v;
         }
+        
         
         /** Find kings, calculate pieceCount, calculate pawnCounts */
         pieceCount = 0;
@@ -200,7 +162,7 @@ public class YourEvaluator extends Evaluator {
         if (kingLives[WHITE][0] == 0) return -1e9;
         if (kingLives[BLACK][0] == 0) return 1e9;
         
-        /* initialize more position specific static variables */
+        /* initialize more position specific variables */
         pawnLanes = new int[2][7];
         blockedPawns = new int[2];
         pawnCoordinates = new int[2][6][2];
@@ -242,21 +204,12 @@ public class YourEvaluator extends Evaluator {
         double ylivoimaKerroin = 1 + Math.abs(v) / (score[WHITE] + score[BLACK]);
         v *= ylivoimaKerroin; //TODO: Mieti onko tää paras mahdollinen tapa toteuttaa tää juttu?
                               // esim laske et tää toimii jollain vaihdolla ylivoimatilantees
-        
         if (STATE == DEBUG) {
             System.out.println("Original diff: " + (score[WHITE]-score[BLACK]) + ", modified diff: " + v);
         }
         
-        if (STATE == DEV) {
-            Double old = evaluatedPositions.get(hash);
-            if (old != null && old != v) {
-                System.out.println("Old hash " + old + ", new hash " + v);
-                throw new RuntimeException("HASH COLLISION");
-            }
-        }
-        
         if (STATE != DEBUG) {
-            evaluatedPositions.put(hash, v);
+           //evaluatedPositions.put(hash, v);
         }
         return v;
     }
@@ -397,13 +350,18 @@ public class YourEvaluator extends Evaluator {
                 /* Bonus for protection of this unit */
                 if (defendedCount > 0) {
                     /* When multiple units protect a square, 
-                     * don't give score for unneccessary protection */
+                     * don't give score for unneccessary protection.
+                     * For example, if attacker has 4 and we have 7, give score for 5. */
                     int multiplier = defendedCount;
                     if (defendedCount - attackedCount > 1) multiplier -= (defendedCount-attackedCount-1);
                     
                     /* Protecting low value units is more important than protecting high value units,
-                     * because this is essentially about re-capture */
-                    double prot = PROTECTION_BONUS * multiplier * 1.0 / captureValue;
+                     * because controlling a friendly square is essentially about re-capture. */
+                    double limitedCaptureValue = Math.min(captureValue, PVrook[pawnCount[attackColor]] * 1.3);
+                    /* About limitedCaptureValue: because queen's value is boosted 5x to fix promotion
+                     * related incentives, we'll cap it here to 1.3 times rook value. Otherwise we would
+                     * get practically no bonus for controlling a friendly queen square. */
+                    double prot = PROTECTION_BONUS * multiplier * 1.0 / limitedCaptureValue;
                     score[defendColor] += prot;
                     if (STATE == DEBUG) {
                         scoreAnalyzer[defendColor].add("Protection", "protected unit at " + x+","+y, prot);
@@ -445,6 +403,8 @@ public class YourEvaluator extends Evaluator {
         }
     }
     
+    /* Because of the earlier O(6x6) preprocessing, we are sometimes able to
+     * predict score changes 1-2 plies into the future in this O(1) method */
     public void scoreMobilityAndCaptures() {
         score[WHITE] += MOBILITY_BONUS * mobilityCount[WHITE];
         score[BLACK] += MOBILITY_BONUS * mobilityCount[BLACK];
@@ -509,6 +469,9 @@ public class YourEvaluator extends Evaluator {
 
     }
     
+    /* This is the most crucial method in this AI and those tables are used everywhere.
+     * sqControlCount answers how many units of a certain color are threatening/protecting a square 
+     * ..of those, sqControlLowVal gives you the material value of the lowest value unit */
     public void addControl(int color, double unitValue, int x, int y) {
         sqControlCount[color][x][y]++;
         sqControlLowVal[color][x][y] = Math.min(unitValue, sqControlLowVal[color][x][y]);
@@ -557,28 +520,6 @@ public class YourEvaluator extends Evaluator {
                 }
                 neighboringSquares[x][y][0] = pointer;
             }
-        }
-    }
-    
-    /** 2 pawns is ideal, 1 pawn is ok, no pawns considerably worse
-     *  Less bonus towards endgame.
-     */
-    private void generateKingPawnShieldBonus() {
-        kingPawnShieldBonus = new double[9][25]; // [numberOfAdjacentPawns][pieceCount]
-        kingPawnShieldBonus[1][8] = 2;
-        kingPawnShieldBonus[2][8] = 3;
-        for (int j=3; j<=8; j++) kingPawnShieldBonus[j][8] = 0.3;
-        for (int i=9; i<=24; i++) {
-            for (int j=1; j<=8; j++) {
-                kingPawnShieldBonus[j][i] = kingPawnShieldBonus[j][i-1] * 1.1;
-            }
-        }
-        for (int i=1; i<8; i++) {
-            kingPawnShieldBonus[i][7] = 1;
-            kingPawnShieldBonus[i][6] = 1;
-            kingPawnShieldBonus[i][5] = 1;
-            kingPawnShieldBonus[i][4] = 1;
-            kingPawnShieldBonus[i][3] = 1;
         }
     }
     
@@ -775,12 +716,10 @@ public class YourEvaluator extends Evaluator {
     /** TODO: document this */
     public void postProcessKing(int color, int unitId) {
         int enemyColor = (color+1)%2;
-        // int friendlyPawn = (color == WHITE ? Position.WPawn : Position.BPawn);
         int ax = kingLives[color][1];
         int ay = kingLives[color][2];
         
         int availableMoves = 0;
-        int pawnCount = 0;
         for (int i=1; i<neighboringSquares[ax][ay][0];) {
             int x = neighboringSquares[ax][ay][i++];
             int y = neighboringSquares[ax][ay][i++];
@@ -792,10 +731,6 @@ public class YourEvaluator extends Evaluator {
               * if square is not overpowered by enemy's control */
             if (nmyControl - ourControl <= 1) addControl(color, PVking, x, y);
             
-            /* Count adjacent friendly pawns */
-            // if (sq == friendlyPawn) pawnCount++;
-            // disabled
-            
             /** Penalty for enemy control in king adjacent square */
             if (nmyControl > 0) {
                 double penalty = enemyControlNearKingPenalty[nmyControl][pieceCount];
@@ -806,11 +741,6 @@ public class YourEvaluator extends Evaluator {
             /* Possible move if sq is empty or undefended enemy piece */
             if (!isFriendly[color][sq]) availableMoves++;
         }
-
-//        score[color] += kingPawnShieldBonus[pawnCount][pieceCount];
-//        if (STATE == DEBUG) {
-//            scoreAnalyzer[color].add("King+pawns", pawnCount + " adjacent firendly pawns", kingPawnShieldBonus[pawnCount][pieceCount]);
-//        }
         
         if (availableMoves == 0) {
             score[color] -= IMMOBILIZED_KING_PENALTY;
@@ -1131,20 +1061,35 @@ public class YourEvaluator extends Evaluator {
                     score[color] -= DOUBLED_PAWNS_PENALTY;
                     if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Doubled pawns penalty", -DOUBLED_PAWNS_PENALTY);
                 }
-                /* Passed? */
-                switch (color) {
-                    case BLACK:
-                        break;
-                    case WHITE:
-                        break;
-                    default:
-                        break;
-                }
             }
             prevLaneHadPawns = thisLaneHasPawns;
         }
+        /* Passed? */
+        int passedCount = 0;
+        int ahead = (color == WHITE ? +1 : -1);
+        for (int i=0; i<pawnCount[color]; i++) {
+            int x = pawnCoordinates[color][i][0];
+            int y = pawnCoordinates[color][i][1];
+            if (passedPawn(color,x,y,ahead)) passedCount++;
+        }
+        score[color] += PASSED_PAWN_BONUS * passedCount;
+        
         /* Blocked? */
         score[color] -= BLOCKED_PAWN_PENALTY * blockedPawns[color];
+    }
+    
+    /** Returns true if squares ahead of pawn are not threatened or occupied by enemy. */
+    private boolean passedPawn(int color, int x, int startY, int ahead) {
+        int enemyColor = (color+1)%2;
+        int y = startY+ahead;
+        while (y >= 0 && y < 6) {
+            int sq = b[x][y];
+            if (isEnemy[color][sq]) return false;
+            if (sqControlCount[enemyColor][x][y] > 0) return false;
+            y += ahead;
+        }
+        if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Passed pawn bonus from " +x+","+startY, PASSED_PAWN_BONUS);
+        return true;
     }
     
     // </editor-fold>
@@ -1153,20 +1098,20 @@ public class YourEvaluator extends Evaluator {
     private void generatePieceSquareTables() {
         pst = new double[2][7][6][6][25];
         
-        /* PAWNS, first row: Encourage taking center of the board */
-        pst[WHITE][PAWN][0][1][24] = 10;
-        pst[WHITE][PAWN][1][1][24] = 7;
-        pst[WHITE][PAWN][2][1][24] = 0;
+        /* PAWNS, first row: */
+        pst[WHITE][PAWN][0][1][24] = 5;
+        pst[WHITE][PAWN][1][1][24] = 10;
+        pst[WHITE][PAWN][2][1][24] = 0; /* central paawns: 0->20 incentive */
         pst[WHITE][PAWN][3][1][24] = 0;
-        pst[WHITE][PAWN][4][1][24] = 7;        
-        pst[WHITE][PAWN][5][1][24] = 10;
+        pst[WHITE][PAWN][4][1][24] = 10;        
+        pst[WHITE][PAWN][5][1][24] = 5; /* corner pawns: 5->8 incentive */
         /* PAWNS, second row */
-        pst[WHITE][PAWN][0][2][24] = 12;
+        pst[WHITE][PAWN][0][2][24] = 8;
         pst[WHITE][PAWN][1][2][24] = 15;
         pst[WHITE][PAWN][2][2][24] = 20;
         pst[WHITE][PAWN][3][2][24] = 20;
         pst[WHITE][PAWN][4][2][24] = 15;
-        pst[WHITE][PAWN][5][2][24] = 12;
+        pst[WHITE][PAWN][5][2][24] = 8;
         /* PAWNS, third row */
         pst[WHITE][PAWN][0][3][24] = 15;
         pst[WHITE][PAWN][1][3][24] = 30;
@@ -1190,10 +1135,10 @@ public class YourEvaluator extends Evaluator {
                 /* Multipliers result in approximately 340 PST value per endgame pawn near promotion,
                 /* about the same for all lanes */
                 pst[WHITE][PAWN][0][y][pc] = pst[WHITE][PAWN][0][y][pc+1] * 1.11;
-                pst[WHITE][PAWN][1][y][pc] = pst[WHITE][PAWN][1][y][pc+1] * 1.07;
+                pst[WHITE][PAWN][1][y][pc] = pst[WHITE][PAWN][1][y][pc+1] * 1.08;
                 pst[WHITE][PAWN][2][y][pc] = pst[WHITE][PAWN][2][y][pc+1] * 1.047;
                 pst[WHITE][PAWN][3][y][pc] = pst[WHITE][PAWN][3][y][pc+1] * 1.047;
-                pst[WHITE][PAWN][4][y][pc] = pst[WHITE][PAWN][4][y][pc+1] * 1.07;
+                pst[WHITE][PAWN][4][y][pc] = pst[WHITE][PAWN][4][y][pc+1] * 1.08;
                 pst[WHITE][PAWN][5][y][pc] = pst[WHITE][PAWN][5][y][pc+1] * 1.11;
             }
         }
@@ -1295,6 +1240,34 @@ public class YourEvaluator extends Evaluator {
             pst[WHITE][QUEEN][x][0][18] = 2;
         }
         
+        /* QUEEN & ROOK: bonuses for occupying enemy ranks */
+        for (pc=24; pc>=0; pc--) {
+            for (int x=0; x<6; x++) {
+                pst[WHITE][QUEEN][x][4][pc] = 20; /* "7th rank" > "8th" */
+                pst[WHITE][ROOK][x][4][pc] = 20;
+                pst[WHITE][QUEEN][x][5][pc] = 10;
+                pst[WHITE][ROOK][x][5][pc] = 10;
+            }
+        }
+        
+        /* KING: bonus for staying back until endgame */
+        for (pc=24; pc>=10; pc--) {
+            for (int x=0; x<6; x++) {
+                pst[WHITE][KING][x][0][pc] = 20;
+                pst[WHITE][KING][x][1][pc] = 7;
+            }
+        }
+        /* KING: smooth transition into endgame */
+        for (int x=0; x<6; x++) {
+            pst[WHITE][KING][x][0][9] = 12;
+            pst[WHITE][KING][x][1][9] = 4;
+            pst[WHITE][KING][x][0][8] = 6;
+            pst[WHITE][KING][x][1][8] = 2;
+        }
+        
+        /* TODO: King's endgame */
+        
+        
         /* BLACK: replicate all from white, flip y's */
         for (pc=24; pc>=0; pc--) {
             for (int y=0; y<6; y++) {
@@ -1306,77 +1279,23 @@ public class YourEvaluator extends Evaluator {
             }
         }
         
-       
-        for (int y=0; y<6; y++) {
-            for (int x=0; x<6; x++) {
-                //System.out.print("y = " + y + " , " + pst[BLACK][PAWN][x][y][5] + " - ");
+        
+        /* Draw some PST's */
+        if (true) return;
+        int color = WHITE;
+        int unit = PAWN;
+        for (pc=24; pc>=0; pc--) {
+            double[][] copy = new double[6][6];
+            for (int y=0; y<6; y++) {
+                for (int x=0; x<6; x++) {
+                    copy[5-y][x] = pst[color][unit][x][y][pc];
+                }
             }
-            //System.out.println("");
+            System.out.println("*********************");
+            System.out.println("   At piececount " + pc);
+            draw(copy);
         }
         
-        //for (int x=0; x<6; x++) pst[WHITE][PAWN][x][1]
-    }
-    
-    private void generateControlBonus() {
-//        controlBonus = new double[2][6][6];
-//        // Vihunpuolella-bonukset
-//        for (int x=0; x<=5; x++) controlBonus[WHITE][x][0] = 1;
-//        for (int x=0; x<=5; x++) controlBonus[WHITE][x][1] = 1.05;
-//        for (int x=0; x<=5; x++) controlBonus[WHITE][x][2] = 1.1;
-//        for (int x=0; x<=5; x++) controlBonus[WHITE][x][3] = 1.2;
-//        for (int x=0; x<=5; x++) controlBonus[WHITE][x][4] = 1.25;
-//        for (int x=0; x<=5; x++) controlBonus[WHITE][x][5] = 1.15;
-//        for (int x=0; x<=5; x++) controlBonus[BLACK][x][5] = 1;
-//        for (int x=0; x<=5; x++) controlBonus[BLACK][x][4] = 1.05;
-//        for (int x=0; x<=5; x++) controlBonus[BLACK][x][3] = 1.1;
-//        for (int x=0; x<=5; x++) controlBonus[BLACK][x][2] = 1.2;
-//        for (int x=0; x<=5; x++) controlBonus[BLACK][x][1] = 1.25;
-//        for (int x=0; x<=5; x++) controlBonus[BLACK][x][0] = 1.15;
-//        // Keskustabonukset
-//        controlBonus[WHITE][2][2] += 0.2;
-//        controlBonus[WHITE][3][2] += 0.2;
-//        controlBonus[WHITE][3][3] += 0.2;
-//        controlBonus[WHITE][2][3] += 0.2;
-//        controlBonus[BLACK][2][2] += 0.2;
-//        controlBonus[BLACK][3][2] += 0.2;
-//        controlBonus[BLACK][3][3] += 0.2;
-//        controlBonus[BLACK][2][3] += 0.2;
-//        // Suburb bonukset
-//        controlBonus[WHITE][1][1] += 0.1;
-//        controlBonus[WHITE][1][2] += 0.1;
-//        controlBonus[WHITE][1][3] += 0.1;
-//        controlBonus[WHITE][1][4] += 0.1;
-//        controlBonus[WHITE][2][4] += 0.1;
-//        controlBonus[WHITE][3][4] += 0.1;
-//        controlBonus[WHITE][4][4] += 0.1;
-//        controlBonus[WHITE][4][3] += 0.1;
-//        controlBonus[WHITE][4][2] += 0.1;
-//        controlBonus[WHITE][4][1] += 0.1;
-//        controlBonus[WHITE][3][1] += 0.1;
-//        controlBonus[WHITE][2][1] += 0.1;
-//        controlBonus[BLACK][1][1] += 0.1;
-//        controlBonus[BLACK][1][2] += 0.1;
-//        controlBonus[BLACK][1][3] += 0.1;
-//        controlBonus[BLACK][1][4] += 0.1;
-//        controlBonus[BLACK][2][4] += 0.1;
-//        controlBonus[BLACK][3][4] += 0.1;
-//        controlBonus[BLACK][4][4] += 0.1;
-//        controlBonus[BLACK][4][3] += 0.1;
-//        controlBonus[BLACK][4][2] += 0.1;
-//        controlBonus[BLACK][4][1] += 0.1;
-//        controlBonus[BLACK][3][1] += 0.1;
-//        controlBonus[BLACK][2][1] += 0.1;
-    }
-
-    private void generatePawnUpgradePotentialBonuses() {
-        pawnUpgradePotentialBonus = new double[2][6];
-        pawnUpgradePotentialBonus[WHITE][2] = 10;
-        pawnUpgradePotentialBonus[WHITE][3] = 40;
-        pawnUpgradePotentialBonus[WHITE][4] = 100;
-        
-        pawnUpgradePotentialBonus[BLACK][3] = 10;
-        pawnUpgradePotentialBonus[BLACK][2] = 40;
-        pawnUpgradePotentialBonus[BLACK][1] = 100;
     }
 
     private void generateTrivialLookupTables() {
@@ -1395,22 +1314,22 @@ public class YourEvaluator extends Evaluator {
         for (int i=7; i<=12; i++) isEnemy[WHITE][i] = true;
 
         PVpawn = new double[7];
-        PVpawn[6] = 90;
-        PVpawn[5] = 92;
-        PVpawn[4] = 96;
-        PVpawn[3] = 104;
-        PVpawn[2] = 120;
-        PVpawn[1] = 140;
+        PVpawn[6] = 94;
+        PVpawn[5] = 96;
+        PVpawn[4] = 98;
+        PVpawn[3] = 101;
+        PVpawn[2] = 107;
+        PVpawn[1] = 120;
         
         /* Knight has more value when opponent has more pawns */
         PVknight = new double[7];
-        PVknight[6] = 320;
+        PVknight[6] = 315;
         PVknight[5] = 310;
-        PVknight[4] = 300;
-        PVknight[3] = 290;
-        PVknight[2] = 275;
-        PVknight[1] = 260;
-        PVknight[0] = 240;
+        PVknight[4] = 305;
+        PVknight[3] = 300;
+        PVknight[2] = 295;
+        PVknight[1] = 290;
+        PVknight[0] = 280;
         
         /* Rook has more value when opponent has less pawns */
         PVrook = new double[7];
@@ -1425,6 +1344,33 @@ public class YourEvaluator extends Evaluator {
         
         PVpawnsTotal = new double[7];
         for (int i=1; i<=6; i++) PVpawnsTotal[i] = PVpawnsTotal[i-1] + PVpawn[i];
+    }
+    
+    public void reWeightMaterialScores(double weight) {
+        PVqueen *= weight;
+        PVking *= weight;
+        for (int i=0; i<PVknight.length; i++) PVknight[i] *= weight;
+        for (int i=0; i<PVpawn.length; i++) PVpawn[i] *= weight;
+        for (int i=0; i<PVrook.length; i++) PVrook[i] *= weight;
+    }
+    
+    public void reWeightKQscores(double weight) {
+        PVqueen *= weight;
+        PVking *= weight;
+    }
+    
+    public void reWeightPST(double weight) {
+        for (int pc=24; pc>=0; pc--) {
+            for (int y=0; y<6; y++) {
+                for (int x=0; x<6; x++) {
+                    for (int unit=0; unit<7; unit++) {
+                        for (int color=0; color<=1; color++) {
+                            pst[color][unit][x][y][pc] = pst[color][unit][x][y][pc] * weight;
+                        }
+                    }
+                }
+            }
+        }
     }
 
 
@@ -1631,7 +1577,7 @@ public class YourEvaluator extends Evaluator {
         int max = 1;
         for (int y=0; y<d.length; y++) {
             for (int x=0; x<d[0].length; x++) {
-                max = Math.max(max, ("" + d[y][x]).length());
+                max = Math.max(max, ("" + formatDouble(d[y][x])).length());
             }
         }
         System.out.print("  ");
@@ -1644,24 +1590,17 @@ public class YourEvaluator extends Evaluator {
         for (int y=0; y<d.length; y++) {
             System.out.print(y + " ");
             for (int x=0; x<d[0].length; x++) {
-                System.out.print(" [" + String.format(format, (d[y][x])) + "]");
+                System.out.print(" [" + String.format(format, formatDouble(d[y][x])) + "]");
             }
             System.out.println("");
         }
     }
     
+    public static String formatDouble(Double d) {
+        return String.format("%.0f", d);
+    }
     
-    
-    
-    
-    private boolean notHackEvalCallOfStartPosition(Position p) {
-        Position s = new Position();
-        s.setStartingPosition();
-        for (int y=0; y<6; y++) {
-            for (int x=0; x<6; x++) {
-                if (s.board[x][y] != p.board[x][y]) return true;
-            }
-        }
-        return false;
+    public void clearHash() {
+        evaluatedPositions.clear();
     }
 }
