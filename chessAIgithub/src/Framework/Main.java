@@ -152,13 +152,13 @@ public class Main {
                 
                 
                 while (true) {
-                    ye = new CerberusV0();
+                    oe = new DecompiledOurEvaluator();
                     
                     YourEvaluator currentPhalanx = new YourEvaluator();
                     whichWeight = (whichWeight+1)%weights.length;
                     double weight = weights[whichWeight];
                     currentPhalanx.reWeightPST(weight);
-                    oe = currentPhalanx;
+                    ye = currentPhalanx;
                     
                     
                     

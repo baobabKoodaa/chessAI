@@ -1,18 +1,10 @@
 package Evaluators;
 
-
 import Framework.Position;
-import Evaluators.Evaluator;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map.Entry;
 import java.util.Random;
-import org.omg.CORBA.INTERNAL;
 
 public class YourEvaluator extends Evaluator {
     
@@ -125,6 +117,8 @@ public class YourEvaluator extends Evaluator {
         if (STATE != DEBUG) {
             Double v = evaluatedPositions.get(hash);
             //if (v != null) return v;
+            /* Hashing disabled due to some weird problems (not hash collisions) */
+            /* I would enable hashing if there was some penalty for using time */
         }
         
         
@@ -197,7 +191,6 @@ public class YourEvaluator extends Evaluator {
         
         /** * * MAGIC * * */
         postProcessSquares();
-        scoreMobilityAndCaptures();
         /** * * MAGIC * * */
         
         double v = score[WHITE] - score[BLACK];
@@ -257,6 +250,8 @@ public class YourEvaluator extends Evaluator {
         postProcessPawns(WHITE);
         postProcessPawns(BLACK);
         analyzePotentialCapturesEtc();
+        scoreMobility();
+        scoreCaptures();
     }
    
     public void analyzePotentialCapturesEtc() {
@@ -403,12 +398,14 @@ public class YourEvaluator extends Evaluator {
         }
     }
     
-    /* Because of the earlier O(6x6) preprocessing, we are sometimes able to
-     * predict score changes 1-2 plies into the future in this O(1) method */
-    public void scoreMobilityAndCaptures() {
+    public void scoreMobility() {
         score[WHITE] += MOBILITY_BONUS * mobilityCount[WHITE];
         score[BLACK] += MOBILITY_BONUS * mobilityCount[BLACK];
-        
+    }
+    
+    /* Because of the earlier O(6x6) preprocessing, we are sometimes able to
+     * predict captures 1-2 plies into the future in this O(1) method */
+    public void scoreCaptures() {
         if (kingUnderCheck[sideToMove] == 0) {
             /* Award sideToMove the best naive capture value
              * This has to be a legal move, because:
@@ -425,8 +422,8 @@ public class YourEvaluator extends Evaluator {
             if (STATE == DEBUG) {
                 scoreAnalyzer[sideWaiting].add("Naive value for 2nd best capture", "--", bestCapValue[sideWaiting][1]);
             }
-            /* Note: if sideToMove has en pris capture of sideWaiting's unit X
-            *       and X is threatening 2 valuable units of sideToMove, then 
+            /* Sidenote: if sideToMove has en pris capture of sideWaiting's unit
+            *       X and X is threatening 2 valuable units of sideToMove, then 
             *       sideWaiting will incorrectly gain score for his 2nd most
             *       valuable potential capture, which will never be realized. */
         } else {
@@ -459,7 +456,8 @@ public class YourEvaluator extends Evaluator {
             
         }
         
-        /** capAlt has the sum of [unit values multiplied by number of threats to those units] */
+        /* capAlt gives some score for, essentially, the sum of capture opportunities  */
+        /* capAlt has the sum of [unit values multiplied by number of threats to those units] */
         score[WHITE] += CAPTURITY_BONUS * capAlt[WHITE];
         score[BLACK] += CAPTURITY_BONUS * capAlt[BLACK];
         if (STATE == DEBUG) {
@@ -469,7 +467,7 @@ public class YourEvaluator extends Evaluator {
 
     }
     
-    /* This is the most crucial method in this AI and those tables are used everywhere.
+    /* These tables are used everywhere.
      * sqControlCount answers how many units of a certain color are threatening/protecting a square 
      * ..of those, sqControlLowVal gives you the material value of the lowest value unit */
     public void addControl(int color, double unitValue, int x, int y) {
@@ -542,7 +540,6 @@ public class YourEvaluator extends Evaluator {
     
     // </editor-fold>
     
-    /** Called during hashing */
     public void markKingLocation(int color, int x, int y) {
         kingLives[color][0] = 1337; // [x] king lives
         kingLives[color][1] = x;
@@ -557,7 +554,7 @@ public class YourEvaluator extends Evaluator {
         checkingUnit[color][1] = y;
     }
 
-    /** Discover checks and pins. */
+    /** Discover checks and pins (excluding diagonal pins from a queen) */
     public void preProcessKing(int color, int ax, int ay) {
         double pstValue = pst[color][KING][ax][ay][pieceCount];
         score[color] += pstValue;
@@ -603,6 +600,7 @@ public class YourEvaluator extends Evaluator {
             if (b[x][y] == nmyKnight) markCheck(color,x,y);
         }
         
+        /* Scan to the left for rooks/queens */
         int sx = -1;
         int sy = -1;
         int x = ax-1;
@@ -631,6 +629,7 @@ public class YourEvaluator extends Evaluator {
             }
         }
         
+        /* Scan to the right for rooks/queens */
         sx = -1;
         sy = -1;
         x = ax + 1;
@@ -713,7 +712,7 @@ public class YourEvaluator extends Evaluator {
         }
     }
     
-    /** TODO: document this */
+    /** King's control, mobility, enemy control in king adjacent squares */
     public void postProcessKing(int color, int unitId) {
         int enemyColor = (color+1)%2;
         int ax = kingLives[color][1];
@@ -845,6 +844,7 @@ public class YourEvaluator extends Evaluator {
         }
     }
     
+    /* TODO: Units pinned by this queen */
     private void diagonalControlsAndMobilityAndChecks(int color, double unitValue, int ax, int ay) {
         int enemyKing = (color == WHITE ? Position.BKing : Position.WKing);
         int enemyColor = (color+1)%2;
@@ -1002,7 +1002,7 @@ public class YourEvaluator extends Evaluator {
         if (pinned[ax][ay][0] != 0) {
             /** TODO: eligible moves when pinned */
             blockedPawns[color]++;
-            if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Blocked pawn at " + ax+","+ay, -BLOCKED_PAWN_PENALTY);
+            if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Pinned pawn at " + ax+","+ay, -BLOCKED_PAWN_PENALTY);
             return;
         } 
         
@@ -1038,10 +1038,12 @@ public class YourEvaluator extends Evaluator {
                 mobilityCount[color]++;
             }
         }
+        /* TODO: Somehow award pawns for threatening empty squares
+         * (other units already get mobility bonus for all squares they control) */
 
     }
     
-    /** Endgame incentive to upgrade pawns + penalty for same lane pawns. */
+    /** Pawns: score passed, isolated, doubled, blocked */
     private void postProcessPawns(int color) {
         double pieceValues = PVpawnsTotal[pawnCount[color]];
         score[color] += pieceValues;
@@ -1372,6 +1374,18 @@ public class YourEvaluator extends Evaluator {
             }
         }
     }
+    
+    private void initializeSqControl() {
+        sqControlCount = new int[2][6][6];
+        sqControlLowVal = new double[2][6][6];
+        for (int color=0; color<=1; color++) {
+            for (int x=0; x<6; x++) {
+                for (int y=0; y<6; y++) {
+                    sqControlLowVal[color][x][y] = Double.POSITIVE_INFINITY;
+                }
+            }
+        }
+    }
 
 
     
@@ -1380,7 +1394,7 @@ public class YourEvaluator extends Evaluator {
     
     
 
-    
+    /* Debugging helper methods below */
     
     void analyzeScores() {
         System.out.println("Side to move: " + sideToMove);
@@ -1419,18 +1433,6 @@ public class YourEvaluator extends Evaluator {
         }
         if (kingUnderCheck[WHITE] != sqControlCount[BLACK][kingLives[WHITE][1]][kingLives[WHITE][2]]) {
             System.out.println("!!!!! ERROR !!!!!! Checking mismatch white");
-        }
-    }
-
-    private void initializeSqControl() {
-        sqControlCount = new int[2][6][6];
-        sqControlLowVal = new double[2][6][6];
-        for (int color=0; color<=1; color++) {
-            for (int x=0; x<6; x++) {
-                for (int y=0; y<6; y++) {
-                    sqControlLowVal[color][x][y] = Double.POSITIVE_INFINITY;
-                }
-            }
         }
     }
 
