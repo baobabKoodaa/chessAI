@@ -14,7 +14,7 @@ public class Main {
 	static Evaluator ce; // current evaluator
 	static Evaluator oe; // our evaluator
 	static Evaluator ye; // your evaluator
-        static MainFrame frame;
+    static MainFrame frame;
 	
 	class PositionComparator implements Comparator<Position> {
 		public int compare(Position p1, Position p2) {
@@ -23,6 +23,7 @@ public class Main {
 	}
         
         public static void main(String[] args) {
+                //duel();
                 eternityBotDuel();
                 manualPlay();
         }
@@ -77,180 +78,242 @@ public class Main {
 		return alphabeta(p,depth,alpha,beta,player);
 	}
         
-        public static void manualPlay() {
-                frame = new MainFrame("manualPlay");
-                Position p = new Position();
-                p.setStartingPosition();
-                p.addPositionToGUIpositionList(frame.c);
+    public static void manualPlay() {
+            frame = new MainFrame("manualPlay");
+            Position p = new Position();
+            p.setStartingPosition();
+            p.addPositionToGUIpositionList(frame.c);
+    }
+
+    public static void requestMove(Evaluator evaluator, Position p) {
+        ce = evaluator;
+        Vector<Position> P = p.getNextPositions();
+        int depth = 5;
+        if(p.winner == +1) {
+                System.out.println("White won.");
+                frame.c.gameOver("White won.");
+                return;
         }
-        
-        public static void requestMove(Evaluator evaluator, Position p) {
-            ce = evaluator;
+
+        if(p.winner == -1) {
+                System.out.println("Black won.");
+                frame.c.gameOver("Black won.");
+                return;
+        }
+
+        if(P.size() == 0) {
+                System.out.println("No more available moves");
+                frame.c.gameOver("No more available moves");
+                return;
+        }
+
+        Position bestPosition = new Position();
+        if(p.whiteToMove) {
+                double max = -1./0.;
+                for(int i = 0; i < P.size(); ++i) {
+                        double val = minmax(P.elementAt(i),depth,1);
+                        if(max < val) {
+                                bestPosition = P.elementAt(i);
+                                max = val;
+                        }
+                }
+        } else {
+                double min = 1./0.;
+                for(int i = 0; i < P.size(); ++i) {
+                        double val = minmax(P.elementAt(i),depth,0);
+                        if(min > val) {
+                                bestPosition = P.elementAt(i);
+                                min = val;
+                        }
+                }
+        }
+        assert p.whiteToMove != bestPosition.whiteToMove;
+        p = bestPosition;
+        p.addPositionToGUIpositionList(frame.c);
+    }
+
+    public static void duel() {
+        oe = new DecompiledOurEvaluator();
+        ye = new CerberusV0();
+
+        frame = new MainFrame("botDuel");
+        int depth = 5;
+
+        Position p = new Position();
+        p.setStartingPosition();
+        p.addPositionToGUIpositionList(frame.c);
+        oe.eval(p);
+
+        int moveNumber = 0;
+        for (; moveNumber < 150; moveNumber++) {
             Vector<Position> P = p.getNextPositions();
-            int depth = 5;
+
             if(p.winner == +1) {
-                    System.out.println("White won.");
-                    frame.c.gameOver("White won.");
-                    return;
-            } 
+                System.out.println("White won.");
+                frame.c.gameOver("White won.");
+                break;
+            }
 
             if(p.winner == -1) {
-                    System.out.println("Black won.");
-                    frame.c.gameOver("Black won.");
-                    return;
+                System.out.println("Black won.");
+                frame.c.gameOver("Black won.");
+                break;
             }
 
             if(P.size() == 0) {
-                    System.out.println("No more available moves");
-                    frame.c.gameOver("No more available moves");
-                    return;
+                System.out.println("No more available moves");
+                frame.c.gameOver("No more available moves");
+                break;
             }
 
             Position bestPosition = new Position();
             if(p.whiteToMove) {
-                    double max = -1./0.;
-                    for(int i = 0; i < P.size(); ++i) {
-                            double val = minmax(P.elementAt(i),depth,1);
-                            if(max < val) {
-                                    bestPosition = P.elementAt(i);
-                                    max = val;
-                            }
+                ce = ye;
+                double max = -1./0.;
+                for(int i = 0; i < P.size(); ++i) {
+                    double val = minmax(P.elementAt(i),depth,1);
+                    if(max < val) {
+                        bestPosition = P.elementAt(i);
+                        max = val;
                     }
+                }
             } else {
-                    double min = 1./0.;
-                    for(int i = 0; i < P.size(); ++i) {
-                            double val = minmax(P.elementAt(i),depth,0);
-                            if(min > val) {
-                                    bestPosition = P.elementAt(i);
-                                    min = val;
-                            }
+                ce = oe;
+                double min = 1./0.;
+                for(int i = 0; i < P.size(); ++i) {
+                    double val = minmax(P.elementAt(i),depth,0);
+                    if(min > val) {
+                        bestPosition = P.elementAt(i);
+                        min = val;
                     }
+                }
             }
             assert p.whiteToMove != bestPosition.whiteToMove;
             p = bestPosition;
             p.addPositionToGUIpositionList(frame.c);
         }
-        
-        public static void eternityBotDuel() {
-                frame = new MainFrame("botDuel");
-		int depth = 5;
-                double whiteTimeTotal = 0;
-                double blackTimeTotal = 0;
-                int whiteWins = 0;
-                int blackWins = 0;
-                int ties = 0;
-                
-                
-                int whichWeight = -1;
-                ArrayList<Double> options = new ArrayList<>();
-                options.add(1.0);
-                Double[] weights = options.toArray(new Double[options.size()]);
-                
-                int[] winsAtDiffWeights = new int[weights.length];
-                int[] tiesAtDiffWeights = new int[weights.length];
-                int[] lossesAtDiffWeights = new int[weights.length];
-                
-                
-                while (true) {
-                    oe = new DecompiledOurEvaluator();
-                    
-                    YourEvaluator currentPhalanx = new YourEvaluator();
-                    whichWeight = (whichWeight+1)%weights.length;
-                    double weight = weights[whichWeight];
-                    currentPhalanx.reWeightPST(weight);
-                    ye = currentPhalanx;
-                    
-                    
-                    
-                    
-                    
-                    Position p = new Position();
-                    p.setStartingPosition();
-                    p.addPositionToGUIpositionList(frame.c);
-                    oe.eval(p);
-                    
-                    long ms = System.currentTimeMillis();
-                    int moveNumber = 0;
-                    for (; moveNumber < 150; moveNumber++) {
-                            Vector<Position> P = p.getNextPositions();
+    }
 
-                            if(p.winner == +1) {
-                                    System.out.println("White won.");
-                                    frame.c.gameOver("White won.");
-                                    whiteWins++;
-                                    winsAtDiffWeights[whichWeight]++;
-                                    break;
-                            } 
+    public static void eternityBotDuel() {
+            frame = new MainFrame("botDuel");
+            int depth = 5;
+            double whiteTimeTotal = 0;
+            double blackTimeTotal = 0;
+            int whiteWins = 0;
+            int blackWins = 0;
+            int ties = 0;
 
-                            if(p.winner == -1) {
-                                    System.out.println("Black won.");
-                                    frame.c.gameOver("Black won.");
-                                    blackWins++;
-                                    lossesAtDiffWeights[whichWeight]++;
-                                    break;
-                            }
 
-                            if(P.size() == 0) {
-                                    System.out.println("No more available moves");
-                                    frame.c.gameOver("No more available moves");
-                                    tiesAtDiffWeights[whichWeight]++;
-                                    ties++;
-                                    break;
-                            }
+            int whichWeight = -1;
+            ArrayList<Double> options = new ArrayList<>();
+            options.add(1.0);
+            Double[] weights = options.toArray(new Double[options.size()]);
 
-                            Position bestPosition = new Position();
-                            if(p.whiteToMove) {
-                                    ce = ye;
-                                    double max = -1./0.;
-                                    for(int i = 0; i < P.size(); ++i) {
-                                            double val = minmax(P.elementAt(i),depth,1);
-                                            if(max < val) {
-                                                    bestPosition = P.elementAt(i);
-                                                    max = val;
-                                            }
-                                    }
-                            } else {
-                                    ce = oe;
-                                    double min = 1./0.;
-                                    for(int i = 0; i < P.size(); ++i) {
-                                            double val = minmax(P.elementAt(i),depth,0);
-                                            if(min > val) {
-                                                    bestPosition = P.elementAt(i);
-                                                    min = val;
-                                            }
-                                    }
-                            }
+            int[] winsAtDiffWeights = new int[weights.length];
+            int[] tiesAtDiffWeights = new int[weights.length];
+            int[] lossesAtDiffWeights = new int[weights.length];
 
-                            assert p.whiteToMove != bestPosition.whiteToMove;
-                            p = bestPosition;
-                            p.addPositionToGUIpositionList(frame.c);
 
-                            long curtime = System.currentTimeMillis();
+            while (true) {
 
-                            double timespent = (curtime-ms)/1000.0;
-                            if (p.whiteToMove) {
-                                blackTimeTotal += timespent;
-                            } else {
-                                whiteTimeTotal += timespent;
-                            }
-                            //System.out.println((p.whiteToMove ? "Black" : "White") +" move took "+timespent+" seconds");
-                            //System.out.println("     Overall white has spent " + whiteTimeTotal + "s, black has spent " + blackTimeTotal + "s");
-                            ms = curtime;
-                    }
-                    if (moveNumber == 150) {
-                        System.out.println("TIE - after 150 moves");
-                        tiesAtDiffWeights[whichWeight]++;
-                        ties++;
-                    }
-                    currentPhalanx.clearHash();
-                    System.out.println("Tally :: WHITE " + whiteWins + " :: BLACK " + blackWins + " :: TIES " + ties);
-                    System.out.println("Time :: white " + whiteTimeTotal + " :: black " + blackTimeTotal);
-                    System.out.println("***************************************");
-                    System.out.println("WEIGHTS: " + Arrays.toString(weights));
-                    System.out.println("WINS:    " + Arrays.toString(winsAtDiffWeights));
-                    System.out.println("LOSSES:  " + Arrays.toString(lossesAtDiffWeights));
-                    System.out.println("TIES:    " + Arrays.toString(tiesAtDiffWeights));
+
+                YourEvaluator currentPhalanx = new YourEvaluator();
+                whichWeight = (whichWeight+1)%weights.length;
+                double weight = weights[whichWeight];
+                currentPhalanx.reWeightPST(weight);
+                ye = currentPhalanx;
+                oe = new CerberusV1();
+
+
+
+
+                Position p = new Position();
+                p.setStartingPosition();
+                p.addPositionToGUIpositionList(frame.c);
+                oe.eval(p);
+
+                long ms = System.currentTimeMillis();
+                int moveNumber = 0;
+                for (; moveNumber < 150; moveNumber++) {
+                        Vector<Position> P = p.getNextPositions();
+
+                        if(p.winner == +1) {
+                                System.out.println("White won.");
+                                frame.c.gameOver("White won.");
+                                whiteWins++;
+                                winsAtDiffWeights[whichWeight]++;
+                                break;
+                        }
+
+                        if(p.winner == -1) {
+                                System.out.println("Black won.");
+                                frame.c.gameOver("Black won.");
+                                blackWins++;
+                                lossesAtDiffWeights[whichWeight]++;
+                                break;
+                        }
+
+                        if(P.size() == 0) {
+                                System.out.println("No more available moves");
+                                frame.c.gameOver("No more available moves");
+                                tiesAtDiffWeights[whichWeight]++;
+                                ties++;
+                                break;
+                        }
+
+                        Position bestPosition = new Position();
+                        if(p.whiteToMove) {
+                                ce = ye;
+                                double max = -1./0.;
+                                for(int i = 0; i < P.size(); ++i) {
+                                        double val = minmax(P.elementAt(i),depth,1);
+                                        if(max < val) {
+                                                bestPosition = P.elementAt(i);
+                                                max = val;
+                                        }
+                                }
+                        } else {
+                                ce = oe;
+                                double min = 1./0.;
+                                for(int i = 0; i < P.size(); ++i) {
+                                        double val = minmax(P.elementAt(i),depth,0);
+                                        if(min > val) {
+                                                bestPosition = P.elementAt(i);
+                                                min = val;
+                                        }
+                                }
+                        }
+
+                        assert p.whiteToMove != bestPosition.whiteToMove;
+                        p = bestPosition;
+                        p.addPositionToGUIpositionList(frame.c);
+
+                        long curtime = System.currentTimeMillis();
+
+                        double timespent = (curtime-ms)/1000.0;
+                        if (p.whiteToMove) {
+                            blackTimeTotal += timespent;
+                        } else {
+                            whiteTimeTotal += timespent;
+                        }
+                        //System.out.println((p.whiteToMove ? "Black" : "White") +" move took "+timespent+" seconds");
+                        //System.out.println("     Overall white has spent " + whiteTimeTotal + "s, black has spent " + blackTimeTotal + "s");
+                        ms = curtime;
                 }
-                
+                if (moveNumber == 150) {
+                    System.out.println("TIE - after 150 moves");
+                    tiesAtDiffWeights[whichWeight]++;
+                    ties++;
+                }
+                currentPhalanx.clearHash();
+                System.out.println("Tally :: WHITE " + whiteWins + " :: BLACK " + blackWins + " :: TIES " + ties);
+                System.out.println("Time :: white " + whiteTimeTotal + " :: black " + blackTimeTotal);
+                System.out.println("***************************************");
+                System.out.println("WEIGHTS: " + Arrays.toString(weights));
+                System.out.println("WINS:    " + Arrays.toString(winsAtDiffWeights));
+                System.out.println("LOSSES:  " + Arrays.toString(lossesAtDiffWeights));
+                System.out.println("TIES:    " + Arrays.toString(tiesAtDiffWeights));
+            }
+
 	}
 }

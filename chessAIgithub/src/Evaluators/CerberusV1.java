@@ -6,13 +6,13 @@ import java.util.LinkedHashMap;
 import java.util.Map.Entry;
 import java.util.Random;
 
-public class YourEvaluator extends Evaluator {
-    
+public class CerberusV1 extends Evaluator {
+
     public static final int DEV = 1;
     public static final int PRODUCTION = 2;
     public static final int DEBUG = 3;
     public int STATE = PRODUCTION;
-    
+
     public static final int BLACK = 0;
     public static final int WHITE = 1;
     public static final int KING = 1;
@@ -20,7 +20,7 @@ public class YourEvaluator extends Evaluator {
     public static final int ROOK = 3;
     public static final int KNIGHT = 5;
     public static final int PAWN = 6;
-    
+
     public static final double HOSTILE_PIN_BONUS = 30;
     public static final double IMMOBILIZED_KING_PENALTY = 10;
     public static final double CAPTURITY_BONUS = 0.02;
@@ -28,18 +28,18 @@ public class YourEvaluator extends Evaluator {
     public static final double BLOCKED_PAWN_PENALTY = 25;
     public static final double ISOLATED_PAWN_PENALTY = 25; /* Per pawn */
     public static final double DOUBLED_PAWNS_PENALTY = 50; /* Per lane */
-    
+
     public double COST_OF_TEMPO = 60; // eg. check
     public double PROTECTION_BONUS = 1000;
     public double MOBILITY_BONUS = 10;
-    
+
     public double PVqueen = 900;
     public double PVking = 20000;
     public double[] PVpawnsTotal;
     public double[] PVpawn;
     public double[] PVknight;
     public double[] PVrook;
-    
+
     HashMap<Long, Double> evaluatedPositions;
     Random rng;
 
@@ -65,7 +65,7 @@ public class YourEvaluator extends Evaluator {
     double[] capAlt;
     int[][] kingLives;
     int[] pawns;
-    
+
     // Set once
     double[][][][][] pst;
     double[][] enemyControlNearKingPenalty;
@@ -74,12 +74,12 @@ public class YourEvaluator extends Evaluator {
     boolean[][] isEnemy;
     int[][][] neighboringSquares;
     int[][][] knightMoveLists;
-    
+
     // Debugging
     ScoreAnalyzer[] scoreAnalyzer;
-    
-    public YourEvaluator() {
-        evaluatedPositions = new HashMap<>();        
+
+    public CerberusV1() {
+        evaluatedPositions = new HashMap<>();
         rng = new Random();
         generateTrivialLookupTables();
         generateEnemyControlNearKingPenalty();
@@ -90,34 +90,34 @@ public class YourEvaluator extends Evaluator {
         reWeightPST(1.2); /* 1.2 found by experimenting */
         reWeightKQscores(5.0); /* Queen boosted 5x. Not entirely sure why this improves results. */
     }
-    
-    public double eval(Position p) {        
+
+    public double eval(Position p) {
         double v = ev(p);
         if (STATE == DEBUG) analyzeScores();
         if (STATE == PRODUCTION) v += 10 - rng.nextInt(20);
         return v;
     }
-    
+
     public double ev(Position p) {
         b = p.board;
-        
+
         if (STATE == DEBUG) {
             scoreAnalyzer = new ScoreAnalyzer[2];
             scoreAnalyzer[WHITE] = new ScoreAnalyzer();
             scoreAnalyzer[BLACK] = new ScoreAnalyzer();
         }
-        
-        
+
+
         /** Have we seen this position before? */
         long hash = hashPosition(p);
         if (STATE != DEBUG) {
             Double v = evaluatedPositions.get(hash);
             //if (v != null) return v;
-            /* Hashing disabled due to some weird problems (not hash collisions) */
-            /* I would enable hashing if there was some penalty for using time */
+        /* Hashing disabled due to some weird problems (not hash collisions) */
+        /* I would enable hashing if there was some penalty for using time */
         }
-        
-        
+
+
         /** Find kings, calculate pieceCount, calculate pawnCounts */
         pieceCount = 0;
         pawnCount = new int[2];
@@ -142,17 +142,17 @@ public class YourEvaluator extends Evaluator {
                         pawnCount[BLACK]++;
                         break;
                     default:
-                        break;  
+                        break;
                 }
                 pieceCount++;
             }
         }
-        
-        /* checkmate? */
+
+    /* checkmate? */
         if (kingLives[WHITE][0] == 0) return -1e9;
         if (kingLives[BLACK][0] == 0) return 1e9;
-        
-        /* initialize more position specific variables */
+
+    /* initialize more position specific variables */
         pawnLanes = new int[2][7];
         blockedPawns = new int[2];
         pawnCoordinates = new int[2][6][2];
@@ -171,32 +171,38 @@ public class YourEvaluator extends Evaluator {
         pawns = new int[2];
         sideToMove = (p.whiteToMove ? WHITE : BLACK);
         sideWaiting = (sideToMove+1)%2;
-        
+
 
         /** * * MAGIC * * */
         preProcessSquares();
         /** * * MAGIC * * */
-        
-        
-        /* checkmate in 1 ply? */
+
+
+    /* checkmate in 1 ply? */
         if (kingUnderCheck[sideWaiting] > 0) {
             if (sideWaiting == WHITE) return -1e9;
             else                      return 1e9;
         }
-        
-        
+
+
         /** * * MAGIC * * */
         postProcessSquares();
         /** * * MAGIC * * */
-        
+
         double v = score[WHITE] - score[BLACK];
-        
+        double ylivoimaKerroin = 1 + Math.abs(v) / (score[WHITE] + score[BLACK]);
+        v *= ylivoimaKerroin; //TODO: Mieti onko tää paras mahdollinen tapa toteuttaa tää juttu?
+        // esim laske et tää toimii jollain vaihdolla ylivoimatilantees
+        if (STATE == DEBUG) {
+            System.out.println("Original diff: " + (score[WHITE]-score[BLACK]) + ", modified diff: " + v);
+        }
+
         if (STATE != DEBUG) {
-           //evaluatedPositions.put(hash, v);
+            //evaluatedPositions.put(hash, v);
         }
         return v;
     }
-    
+
     public long hashPosition(Position p) {
         long hash = (p.whiteToMove ? 2 : 1);
         long A = 31L;
@@ -216,7 +222,7 @@ public class YourEvaluator extends Evaluator {
         preProcessKing(BLACK, kingLives[BLACK][1], kingLives[BLACK][2]);
         for (int x = 0; x < b.length; x++) {
             for (int y = 0; y < b[x].length; y++) {
-                /* TODO: Faster to locate pawns in pre-preprocessing */
+            /* TODO: Faster to locate pawns in pre-preprocessing */
                 if (Position.WPawn == b[x][y]) preProcessPawn(WHITE, x, y);
                 if (Position.BPawn == b[x][y]) preProcessPawn(BLACK, x, y);
             }
@@ -232,8 +238,8 @@ public class YourEvaluator extends Evaluator {
                     case Position.WPawn:    /*preProcessPawn(WHITE, x, y);*/break; /* preProcessed earlier */
 
                     case Position.BKing:    /*preProcessKing(BLACK, x, y);*/break; /* preProcessed earlier */
-                    case Position.BQueen:   preProcessQueen(BLACK, x, y);break; 
-                    case Position.BKnight:  preProcessKnight(BLACK, x, y);break;    
+                    case Position.BQueen:   preProcessQueen(BLACK, x, y);break;
+                    case Position.BKnight:  preProcessKnight(BLACK, x, y);break;
                     case Position.BRook:    preProcessRook(BLACK, x, y);break;
                     case Position.BPawn:    /*preProcessPawn(BLACK, x, y)*/;break; /* preProcessed earlier */
                     default:                ; break;
@@ -241,7 +247,7 @@ public class YourEvaluator extends Evaluator {
             }
         }
     }
-    
+
     public void postProcessSquares() {
         postProcessKing(WHITE, Position.WKing);
         postProcessKing(BLACK, Position.BKing);
@@ -251,7 +257,7 @@ public class YourEvaluator extends Evaluator {
         scoreMobility();
         scoreCaptures();
     }
-   
+
     public void analyzePotentialCapturesEtc() {
         double captureValue = -1; /* placeholder */
         int defendColor = -1;     /* placeholder */
@@ -261,12 +267,12 @@ public class YourEvaluator extends Evaluator {
             for (int y=0; y<6; y++) {
                 switch (b[x][y]) {
                     case Position.Empty: continue;
-                        
-                        /* Kings are a special case, because capturing a king ends the game.
-                         * Therefore, it doesn't matter which piece we sacrifice to get the king.
-                         * CHECK_BONUS is always added to score. If n units are checking,
-                         * the bonus is multiplied n^2 times. */
-                    case Position.WKing:    
+
+                    /* Kings are a special case, because capturing a king ends the game.
+                     * Therefore, it doesn't matter which piece we sacrifice to get the king.
+                     * CHECK_BONUS is always added to score. If n units are checking,
+                     * the bonus is multiplied n^2 times. */
+                    case Position.WKing:
                         defendColor = WHITE;
                         attackColor = BLACK;
                         n = sqControlCount[attackColor][x][y];
@@ -278,7 +284,7 @@ public class YourEvaluator extends Evaluator {
                             }
                         }
                         continue;
-                    case Position.BKing:    
+                    case Position.BKing:
                         defendColor = BLACK;
                         attackColor = WHITE;
                         n = sqControlCount[attackColor][x][y];
@@ -290,8 +296,8 @@ public class YourEvaluator extends Evaluator {
                             }
                         }
                         continue;
-                        
-                        
+
+
                     case Position.WQueen:
                         captureValue = PVqueen;
                         defendColor = WHITE;
@@ -312,7 +318,7 @@ public class YourEvaluator extends Evaluator {
                         attackColor = BLACK;
                         captureValue = PVpawn[pawnCount[defendColor]];
                         break;
-                        
+
                     case Position.BQueen:
                         captureValue = PVqueen;
                         defendColor = BLACK;
@@ -336,46 +342,46 @@ public class YourEvaluator extends Evaluator {
 
                     default:break;
                 }
-                
+
                 int defendedCount = sqControlCount[defendColor][x][y];
                 int attackedCount = sqControlCount[attackColor][x][y];
-                
-                /* Bonus for protection of this unit */
+
+            /* Bonus for protection of this unit */
                 if (defendedCount > 0) {
-                    /* When multiple units protect a square, 
-                     * don't give score for unneccessary protection.
-                     * For example, if attacker has 4 and we have 7, give score for 5 (should it be 4 instead?) */
+                /* When multiple units protect a square,
+                 * don't give score for unneccessary protection.
+                 * For example, if attacker has 4 and we have 7, give score for 5 (should it be 4 instead?) */
                     int multiplier = defendedCount;
                     if (defendedCount - attackedCount > 1) multiplier -= (defendedCount-attackedCount-1);
-                    
-                    /* Protecting low value units is more important than protecting high value units,
-                     * because controlling a friendly square is essentially about re-capture. */
+
+                /* Protecting low value units is more important than protecting high value units,
+                 * because controlling a friendly square is essentially about re-capture. */
                     double limitedCaptureValue = Math.min(captureValue, PVrook[pawnCount[attackColor]] * 1.3);
-                    /* About limitedCaptureValue: because queen's value is boosted 5x to fix promotion
-                     * related incentives, we'll cap it here to 1.3 times rook value. Otherwise we would
-                     * get practically no bonus for controlling a friendly queen square. */
+                /* About limitedCaptureValue: because queen's value is boosted 5x to fix promotion
+                 * related incentives, we'll cap it here to 1.3 times rook value. Otherwise we would
+                 * get practically no bonus for controlling a friendly queen square. */
                     double prot = PROTECTION_BONUS * multiplier * 1.0 / limitedCaptureValue;
                     score[defendColor] += prot;
                     if (STATE == DEBUG) {
                         scoreAnalyzer[defendColor].add("Protection", "protected unit at " + x+","+y, prot);
                     }
                 }
-                
-                /* Best ways to capture this unit */
+
+            /* Best ways to capture this unit */
                 if (attackedCount > 0) {
                     double naiveValue = captureValue;
 
-                    /* Is it defended? */
+                /* Is it defended? */
                     if (defendedCount > 0) {
-                        /* Naively assume it would be a single trade if we attacked with our weakest unit */
+                    /* Naively assume it would be a single trade if we attacked with our weakest unit */
                         naiveValue -= sqControlLowVal[attackColor][x][y];
                     } else {
-                        /* Undefended piece. We can capture it, but we lose tempo. */
+                    /* Undefended piece. We can capture it, but we lose tempo. */
                         // naiveValue -= COST_OF_TEMPO;
-                        /* EXPERIMENT HERE */
-                        /* Commented out because capturing undefended pieces in practice
-                         * typicly lead to great score increases for the capturing side. 
-                         * We would prefer score to remain the same, since that is an expected move. */
+                    /* EXPERIMENT HERE */
+                    /* Commented out because capturing undefended pieces in practice
+                     * typicly lead to great score increases for the capturing side.
+                     * We would prefer score to remain the same, since that is an expected move. */
                     }
                     /** Remember top 2 capture target values, and the top 1 coordinates */
                     if (naiveValue > bestCapValue[attackColor][1]) {
@@ -389,48 +395,48 @@ public class YourEvaluator extends Evaluator {
                         }
                     }
 
-                    /*      count this opportunity even if naiveValue < 0         */
+                /*      count this opportunity even if naiveValue < 0         */
                     capAlt[attackColor] += attackedCount * captureValue;
                 }
             }
         }
     }
-    
+
     public void scoreMobility() {
         score[WHITE] += MOBILITY_BONUS * mobilityCount[WHITE];
         score[BLACK] += MOBILITY_BONUS * mobilityCount[BLACK];
     }
-    
+
     /* Because of the earlier O(6x6) preprocessing, we are sometimes able to
      * predict captures 1-2 plies into the future in this O(1) method */
     public void scoreCaptures() {
         if (kingUnderCheck[sideToMove] == 0) {
-            /* Award sideToMove the best naive capture value
-             * This has to be a legal move, because:
-             *      A. We are not under check
-             *      B. We pruned out pins earlier */
+        /* Award sideToMove the best naive capture value
+         * This has to be a legal move, because:
+         *      A. We are not under check
+         *      B. We pruned out pins earlier */
             score[sideToMove] += bestCapValue[sideToMove][0];
             if (STATE == DEBUG) {
                 scoreAnalyzer[sideToMove].add("Naive value for best IMMEDIATE capture", "--", bestCapValue[sideToMove][0]);
             }
-            /* Award sideWaiting the 2nd best naive capturevalue
-             * (some of these moves may be illegal, but looking
-             *  ahead 2 plies this is a fine approximation) */
+        /* Award sideWaiting the 2nd best naive capturevalue
+         * (some of these moves may be illegal, but looking
+         *  ahead 2 plies this is a fine approximation) */
             score[sideWaiting] += bestCapValue[sideWaiting][1];
             if (STATE == DEBUG) {
                 scoreAnalyzer[sideWaiting].add("Naive value for 2nd best capture", "--", bestCapValue[sideWaiting][1]);
             }
-            /* Sidenote: if sideToMove has en pris capture of sideWaiting's unit
-            *       X and X is threatening 2 valuable units of sideToMove, then 
-            *       sideWaiting will incorrectly gain score for his 2nd most
-            *       valuable potential capture, which will never be realized. */
+        /* Sidenote: if sideToMove has en pris capture of sideWaiting's unit
+        *       X and X is threatening 2 valuable units of sideToMove, then
+        *       sideWaiting will incorrectly gain score for his 2nd most
+        *       valuable potential capture, which will never be realized. */
         } else {
-            /* sideToMove is in check (and has been penalized with COST_OF_TEMPO earlier)
-            /* Can we capture the checking piece and does it naively look like the best capture option? */
+        /* sideToMove is in check (and has been penalized with COST_OF_TEMPO earlier)
+        /* Can we capture the checking piece and does it naively look like the best capture option? */
             if (bestCapCoordinates[sideToMove][0] == checkingUnit[sideToMove][0]
                     && bestCapCoordinates[sideToMove][1] == checkingUnit[sideToMove][1]) {
                 double valueForSideToMove = bestCapValue[sideToMove][0];
-                /* In that case sideWaiting might be able to realize its 2nd best capture */
+            /* In that case sideWaiting might be able to realize its 2nd best capture */
                 double valueForSideWaiting = bestCapValue[sideToMove][1];
                 score[sideToMove] += valueForSideToMove;
                 score[sideWaiting] += valueForSideWaiting;
@@ -439,9 +445,9 @@ public class YourEvaluator extends Evaluator {
                     scoreAnalyzer[sideWaiting].add("Naive value for 2nd best capture", "--", valueForSideWaiting);
                 }
             } else {
-                /* If sideToMove cannot end the check by capturing the checking piece,
-                 * then sideWaiting should be able to realize its best potential capture
-                 * and sideToMove might be able to realize its 2nd best potential capture. */
+            /* If sideToMove cannot end the check by capturing the checking piece,
+             * then sideWaiting should be able to realize its best potential capture
+             * and sideToMove might be able to realize its 2nd best potential capture. */
                 double valueForSideToMove = bestCapValue[sideToMove][1];
                 double valueForSideWaiting = bestCapValue[sideWaiting][0];
                 score[sideToMove] += valueForSideToMove;
@@ -451,11 +457,11 @@ public class YourEvaluator extends Evaluator {
                     scoreAnalyzer[sideToMove].add("Naive value for 2nd best capture", "--", valueForSideToMove);
                 }
             }
-            
+
         }
-        
-        /* capAlt gives some score for, essentially, the sum of capture opportunities  */
-        /* capAlt has the sum of [unit values multiplied by number of threats to those units] */
+
+    /* capAlt gives some score for, essentially, the sum of capture opportunities  */
+    /* capAlt has the sum of [unit values multiplied by number of threats to those units] */
         score[WHITE] += CAPTURITY_BONUS * capAlt[WHITE];
         score[BLACK] += CAPTURITY_BONUS * capAlt[BLACK];
         if (STATE == DEBUG) {
@@ -464,19 +470,19 @@ public class YourEvaluator extends Evaluator {
         }
 
     }
-    
+
     /* These tables are used everywhere.
-     * sqControlCount answers how many units of a certain color are threatening/protecting a square 
+     * sqControlCount answers how many units of a certain color are threatening/protecting a square
      * ..of those, sqControlLowVal gives you the material value of the lowest value unit */
     public void addControl(int color, double unitValue, int x, int y) {
         sqControlCount[color][x][y]++;
         sqControlLowVal[color][x][y] = Math.min(unitValue, sqControlLowVal[color][x][y]);
     }
-    
+
     // <editor-fold defaultstate="collapsed" desc="king related">
-    
+
     // <editor-fold defaultstate="collapsed" desc="generators (king related)">
-    
+
     private void generateNeighboringSquaresLists() {
         neighboringSquares = new int[6][6][17];
         for (int x=0; x<6; x++) {
@@ -518,7 +524,7 @@ public class YourEvaluator extends Evaluator {
             }
         }
     }
-    
+
     /** first array by multiplier (number of threatening units)
      *  second array by piececount; more penalty in early game, no penalty in end game */
     private void generateEnemyControlNearKingPenalty() {
@@ -535,19 +541,19 @@ public class YourEvaluator extends Evaluator {
             penalty += 0.5;
         }
     }
-    
+
     // </editor-fold>
-    
+
     public void markKingLocation(int color, int x, int y) {
         kingLives[color][0] = 1337; // [x] king lives
         kingLives[color][1] = x;
         kingLives[color][2] = y;
     }
-    
+
     /* Coordinates are for the attacking unit. */
     public void markCheck(int color, int x, int y) {
         kingUnderCheck[color]++;
-        /* If multiple units are checking, overwrites coordinates */
+    /* If multiple units are checking, overwrites coordinates */
         checkingUnit[color][0] = x;
         checkingUnit[color][1] = y;
     }
@@ -558,13 +564,13 @@ public class YourEvaluator extends Evaluator {
         score[color] += pstValue;
         if (STATE == DEBUG) scoreAnalyzer[color].add("PST", "KING", pstValue);
         int enemyColor = (color+1)%2;
-        
-        /* Mark which units are pinned
-         *     Friendly unit is pinned -> It has fewer moves
-         *     Hostile unit is pinned -> bonus for enemy       
-         * Also mark if king is being checked */
-        
-        /* Is a pawn checking us? */
+
+    /* Mark which units are pinned
+     *     Friendly unit is pinned -> It has fewer moves
+     *     Hostile unit is pinned -> bonus for enemy
+     * Also mark if king is being checked */
+
+    /* Is a pawn checking us? */
         switch (color) {
             case WHITE: {
                 int y = ay + 1;
@@ -589,16 +595,16 @@ public class YourEvaluator extends Evaluator {
             default:
                 break;
         }
-        
-        /* Is a knight checking us? */
+
+    /* Is a knight checking us? */
         int nmyKnight = (color == WHITE ? Position.BKnight : Position.WKnight);
         for (int i=1; i<knightMoveLists[ax][ay][0];) {
             int x = knightMoveLists[ax][ay][i++];
             int y = knightMoveLists[ax][ay][i++];
             if (b[x][y] == nmyKnight) markCheck(color,x,y);
         }
-        
-        /* Scan to the left for rooks/queens */
+
+    /* Scan to the left for rooks/queens */
         int sx = -1;
         int sy = -1;
         int x = ax-1;
@@ -612,7 +618,7 @@ public class YourEvaluator extends Evaluator {
                 sy = y;
                 if (isEnemyRookOrQueen[color][unit]) markCheck(color,x,y);
             } else {
-                /* Second unit in this direction */
+            /* Second unit in this direction */
                 if (!isEnemyRookOrQueen[color][unit]) break;
                 int pinnedUnit = b[sx][sy]; /* First unit must be pinned */
                 if (isFriendly[color][pinnedUnit]) {
@@ -626,8 +632,8 @@ public class YourEvaluator extends Evaluator {
                 break;
             }
         }
-        
-        /* Scan to the right for rooks/queens */
+
+    /* Scan to the right for rooks/queens */
         sx = -1;
         sy = -1;
         x = ax + 1;
@@ -654,7 +660,7 @@ public class YourEvaluator extends Evaluator {
                 break;
             }
         }
-        
+
         sx = -1;
         sy = -1;
         x = ax;
@@ -681,7 +687,7 @@ public class YourEvaluator extends Evaluator {
                 break;
             }
         }
-        
+
         sx = -1;
         sy = -1;
         x = ax;
@@ -709,13 +715,13 @@ public class YourEvaluator extends Evaluator {
             }
         }
     }
-    
+
     /** King's control, mobility, enemy control in king adjacent squares */
     public void postProcessKing(int color, int unitId) {
         int enemyColor = (color+1)%2;
         int ax = kingLives[color][1];
         int ay = kingLives[color][2];
-        
+
         int availableMoves = 0;
         for (int i=1; i<neighboringSquares[ax][ay][0];) {
             int x = neighboringSquares[ax][ay][i++];
@@ -723,11 +729,11 @@ public class YourEvaluator extends Evaluator {
             int sq = b[x][y];
             int nmyControl = sqControlCount[enemyColor][x][y];
             int ourControl = sqControlCount[color][x][y];
-            
+
             /** King offers some protection/threat to neighboring squares
-              * if square is not overpowered by enemy's control */
+             * if square is not overpowered by enemy's control */
             if (nmyControl - ourControl <= 1) addControl(color, PVking, x, y);
-            
+
             /** Penalty for enemy control in king adjacent square */
             if (nmyControl > 0) {
                 double penalty = enemyControlNearKingPenalty[nmyControl][pieceCount];
@@ -735,10 +741,10 @@ public class YourEvaluator extends Evaluator {
                 if (STATE == DEBUG) scoreAnalyzer[enemyColor].add("Near enemy king", "Control over sq " + x+","+y, penalty);
                 continue; /* King is unable to move into this sq */
             }
-            /* Possible move if sq is empty or undefended enemy piece */
+        /* Possible move if sq is empty or undefended enemy piece */
             if (!isFriendly[color][sq]) availableMoves++;
         }
-        
+
         if (availableMoves == 0) {
             score[color] -= IMMOBILIZED_KING_PENALTY;
             if (STATE == DEBUG) scoreAnalyzer[color].add("Mobility", "Immobilized king penalty", -IMMOBILIZED_KING_PENALTY);
@@ -747,11 +753,11 @@ public class YourEvaluator extends Evaluator {
             if (STATE == DEBUG) scoreAnalyzer[color].add("Mobility", "By king at " + ax+","+ay, MOBILITY_BONUS * availableMoves);
         }
     }
-    
+
     // </editor-fold>
-    
+
     // <editor-fold defaultstate="collapsed" desc="rook/queen">
-    
+
     private void preProcessRook(int color, int ax, int ay) {
         int enemyColor = (color+1)%2;
         double materialValue = PVrook[pawnCount[enemyColor]];
@@ -761,11 +767,11 @@ public class YourEvaluator extends Evaluator {
             scoreAnalyzer[color].add("Material", "ROOK", materialValue);
             scoreAnalyzer[color].add("PST", "ROOK", pst[color][ROOK][ax][ay][pieceCount]);
         }
-        
+
         if (pinned[ax][ay][0] != 0) {
             int x = pinned[ax][ay][1];
             int y = pinned[ax][ay][2];
-            /* Pinned between enemy at [x,y] and king. Can we capture it? */
+        /* Pinned between enemy at [x,y] and king. Can we capture it? */
             if (x == ax || y == ay) {
                 mobilityCount[color]++;
                 if (STATE == DEBUG) scoreAnalyzer[color].add("Mobility", "By unit at " + ax+","+ay + " to square " + x+","+y, MOBILITY_BONUS);
@@ -775,7 +781,7 @@ public class YourEvaluator extends Evaluator {
         }
         addHorizontalVerticalControlsAndMobility(color, materialValue, ax, ay);
     }
-    
+
     private void preProcessQueen(int color, int ax, int ay) {
         score[color] += PVqueen;
         score[color] += pst[color][QUEEN][ax][ay][pieceCount];
@@ -783,16 +789,16 @@ public class YourEvaluator extends Evaluator {
             scoreAnalyzer[color].add("Material", "QUEEN", PVqueen);
             scoreAnalyzer[color].add("PST", "QUEEN", pst[color][QUEEN][ax][ay][pieceCount]);
         }
-        
+
         if (pinned[ax][ay][0] != 0) {
             int x = pinned[ax][ay][1];
             int y = pinned[ax][ay][2];
-            /* Pinned between enemy at [x,y] and king. Queen can capture it. */
+        /* Pinned between enemy at [x,y] and king. Queen can capture it. */
             addControl(color, PVqueen, x, y);
             mobilityCount[color]++;
             if (STATE == DEBUG) scoreAnalyzer[color].add("Mobility", "By unit at " + ax+","+ay + " to square " + x+","+y, MOBILITY_BONUS);
-            /* TODO: Can we check with this capture? */
-            
+        /* TODO: Can we check with this capture? */
+
             return; /* Note: additional allowed moves may exist... */
         }
         addHorizontalVerticalControlsAndMobility(color, PVqueen, ax, ay);
@@ -808,7 +814,7 @@ public class YourEvaluator extends Evaluator {
         mobilityCount[color]++;
         if (STATE == DEBUG) scoreAnalyzer[color].add("Mobility", "By unit at " + ax+","+ay + " to square " + x+","+y, MOBILITY_BONUS);
     }
-    
+
     private void addHorizontalVerticalControlsAndMobility(int color, double unitValue, int ax, int ay) {
         int x = ax-1;
         int y = ay;
@@ -847,7 +853,7 @@ public class YourEvaluator extends Evaluator {
             if (sq != Position.Empty) break;
         }
     }
-    
+
     /* TODO: Units pinned by this queen */
     private void diagonalControlsAndMobilityAndChecks(int color, double unitValue, int ax, int ay) {
         int enemyKing = (color == WHITE ? Position.BKing : Position.WKing);
@@ -909,11 +915,11 @@ public class YourEvaluator extends Evaluator {
             y++;
         }
     }
-    
+
     // </editor-fold>
-    
+
     // <editor-fold defaultstate="collapsed" desc="knight">
-    
+
     private void preProcessKnight(int color, int ax, int ay) {
         int enemyColor = (color+1)%2;
         double materialValue = PVknight[pawnCount[enemyColor]];
@@ -923,7 +929,7 @@ public class YourEvaluator extends Evaluator {
             scoreAnalyzer[color].add("Material", "KNIGHT", materialValue);
             scoreAnalyzer[color].add("PST", "KNIGHT", pst[color][KNIGHT][ax][ay][pieceCount]);
         }
-        
+
         if (pinned[ax][ay][0] != 0) return; /* Assume no eligible moves when pinned */
         for (int i=1; i<knightMoveLists[ax][ay][0];) {
             int x = knightMoveLists[ax][ay][i++];
@@ -934,7 +940,7 @@ public class YourEvaluator extends Evaluator {
             }
         }
     }
-    
+
     private void generateKnightMoveLists() {
         knightMoveLists = new int[6][6][8*2+1];
         for (int x=0; x<6; x++) {
@@ -984,16 +990,16 @@ public class YourEvaluator extends Evaluator {
             }
         }
     }
-        
+
     // </editor-fold>
 
     // <editor-fold defaultstate="collapsed" desc="pawn">
-    
+
     private void preProcessPawn(int color, int ax, int ay) {
         pawnCoordinates[color][pawnPointer[color]][0] = ax;
         pawnCoordinates[color][pawnPointer[color]][1] = ay;
         pawnPointer[color]++;
-        
+
         pawnLanes[color][ax]++; /* +1 pawn this lane */
         score[color] += pst[color][PAWN][ax][ay][pieceCount];
         if (STATE == DEBUG) scoreAnalyzer[color].add("PST", "PAWN", pst[color][PAWN][ax][ay][pieceCount]);
@@ -1003,8 +1009,8 @@ public class YourEvaluator extends Evaluator {
             blockedPawns[color]++;
             if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Pinned pawn at " + ax+","+ay, -BLOCKED_PAWN_PENALTY);
             return;
-        } 
-        
+        }
+
         int ahead = (color == BLACK ? -1 : 1);
         /** Move ahead possible? */
         if (b[ax][ay+ahead] == Position.Empty) {
@@ -1014,11 +1020,11 @@ public class YourEvaluator extends Evaluator {
             blockedPawns[color]++;
             if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Blocked pawn at " + ax+","+ay, -BLOCKED_PAWN_PENALTY);
         }
-        
+
         /** Squares threatened by this pawn */
         /** Lowest denominated unit, so we can just overwrite lowVal */
         int y = ay + ahead;
-        
+
         int x = ax - 1;
         if (x >= 0) {
             sqControlCount[color][x][y]++;
@@ -1037,27 +1043,27 @@ public class YourEvaluator extends Evaluator {
                 mobilityCount[color]++;
             }
         }
-        /* TODO: Somehow award pawns for threatening empty squares
-         * (other units already get mobility bonus for all squares they control) */
-        /* ---> Remove officers' mobility bonus from EMPTY squares threatened by pawns? */
+    /* TODO: Somehow award pawns for threatening empty squares
+     * (other units already get mobility bonus for all squares they control) */
+    /* ---> Remove officers' mobility bonus from EMPTY squares threatened by pawns? */
     }
-    
+
     /** Pawns: score passed, isolated, doubled, blocked */
     private void postProcessPawns(int color) {
         double pieceValues = PVpawnsTotal[pawnCount[color]];
         score[color] += pieceValues;
         if (STATE == DEBUG) scoreAnalyzer[color].add("Material", "All pawns", pieceValues);
-        
+
         boolean prevLaneHadPawns = false;
         for (int lane=0; lane<=5; lane++) {
             boolean thisLaneHasPawns = (pawnLanes[color][lane] > 0);
             if (thisLaneHasPawns) {
-                /* Isolated? */
+            /* Isolated? */
                 if (!prevLaneHadPawns && pawnLanes[color][lane+1] == 0) {
                     score[color] -= ISOLATED_PAWN_PENALTY;
                     if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Isolated pawn penalty", -ISOLATED_PAWN_PENALTY);
                 }
-                /* Doubled? */
+            /* Doubled? */
                 if (pawnLanes[color][lane] > 1) {
                     score[color] -= DOUBLED_PAWNS_PENALTY;
                     if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Doubled pawns penalty", -DOUBLED_PAWNS_PENALTY);
@@ -1065,7 +1071,7 @@ public class YourEvaluator extends Evaluator {
             }
             prevLaneHadPawns = thisLaneHasPawns;
         }
-        /* Passed? */
+    /* Passed? */
         int passedCount = 0;
         int ahead = (color == WHITE ? +1 : -1);
         for (int i=0; i<pawnCount[color]; i++) {
@@ -1074,11 +1080,11 @@ public class YourEvaluator extends Evaluator {
             if (passedPawn(color,x,y,ahead)) passedCount++;
         }
         score[color] += PASSED_PAWN_BONUS * passedCount;
-        
-        /* Blocked? */
+
+    /* Blocked? */
         score[color] -= BLOCKED_PAWN_PENALTY * blockedPawns[color];
     }
-    
+
     /** Returns true if squares ahead of pawn are not threatened or occupied by enemy. */
     private boolean passedPawn(int color, int x, int startY, int ahead) {
         int enemyColor = (color+1)%2;
@@ -1092,49 +1098,49 @@ public class YourEvaluator extends Evaluator {
         if (STATE == DEBUG) scoreAnalyzer[color].add("Pawns", "Passed pawn bonus from " +x+","+startY, PASSED_PAWN_BONUS);
         return true;
     }
-    
+
     // </editor-fold>
-    
+
     /** Reference: [COLOR][UNIT][x][y][pieceCount]. */
     private void generatePieceSquareTables() {
         pst = new double[2][7][6][6][25];
-        
-        /* PAWNS, first row: */
+
+    /* PAWNS, first row: */
         pst[WHITE][PAWN][0][1][24] = 5;
         pst[WHITE][PAWN][1][1][24] = 10;
         pst[WHITE][PAWN][2][1][24] = 0; /* central paawns: 0->20 incentive */
         pst[WHITE][PAWN][3][1][24] = 0;
-        pst[WHITE][PAWN][4][1][24] = 10;        
+        pst[WHITE][PAWN][4][1][24] = 10;
         pst[WHITE][PAWN][5][1][24] = 5; /* corner pawns: 5->8 incentive */
-        /* PAWNS, second row */
+    /* PAWNS, second row */
         pst[WHITE][PAWN][0][2][24] = 8;
         pst[WHITE][PAWN][1][2][24] = 15;
         pst[WHITE][PAWN][2][2][24] = 20;
         pst[WHITE][PAWN][3][2][24] = 20;
         pst[WHITE][PAWN][4][2][24] = 15;
         pst[WHITE][PAWN][5][2][24] = 8;
-        /* PAWNS, third row */
+    /* PAWNS, third row */
         pst[WHITE][PAWN][0][3][24] = 15;
         pst[WHITE][PAWN][1][3][24] = 30;
         pst[WHITE][PAWN][2][3][24] = 60;
         pst[WHITE][PAWN][3][3][24] = 60;
         pst[WHITE][PAWN][4][3][24] = 30;
         pst[WHITE][PAWN][5][3][24] = 15;
-        /* PAWNS, 1 step from promotion (at 24 pieceCount, which is not
-         * possible, but these values are used as reference for other pieceCounts */
+    /* PAWNS, 1 step from promotion (at 24 pieceCount, which is not
+     * possible, but these values are used as reference for other pieceCounts */
         pst[WHITE][PAWN][0][4][24] = 40;
         pst[WHITE][PAWN][1][4][24] = 80;
         pst[WHITE][PAWN][2][4][24] = 130;
         pst[WHITE][PAWN][3][4][24] = 130;
         pst[WHITE][PAWN][4][4][24] = 80;
         pst[WHITE][PAWN][5][4][24] = 40;
-        
-        /* PAWNS: pieceCounts 23 -> 0 */
+
+    /* PAWNS: pieceCounts 23 -> 0 */
         for (int pc=23; pc>=0; pc--) {
             for (int y=0; y<6; y++) {
-                /* Advantage from central pawns should dissipate towards the endgame */
-                /* Multipliers result in approximately 340 PST value per endgame pawn near promotion,
-                /* about the same for all lanes */
+            /* Advantage from central pawns should dissipate towards the endgame */
+            /* Multipliers result in approximately 340 PST value per endgame pawn near promotion,
+            /* about the same for all lanes */
                 pst[WHITE][PAWN][0][y][pc] = pst[WHITE][PAWN][0][y][pc+1] * 1.11;
                 pst[WHITE][PAWN][1][y][pc] = pst[WHITE][PAWN][1][y][pc+1] * 1.08;
                 pst[WHITE][PAWN][2][y][pc] = pst[WHITE][PAWN][2][y][pc+1] * 1.047;
@@ -1143,10 +1149,10 @@ public class YourEvaluator extends Evaluator {
                 pst[WHITE][PAWN][5][y][pc] = pst[WHITE][PAWN][5][y][pc+1] * 1.11;
             }
         }
-        
-        /* KNIGHTS, 0-24pc: */
+
+    /* KNIGHTS, 0-24pc: */
         int pc=24;
-        /* KNIGHTS: Discourage corners */
+    /* KNIGHTS: Discourage corners */
         pst[WHITE][KNIGHT][0][0][pc] = -50;
         pst[WHITE][KNIGHT][1][1][pc] = -20;
         pst[WHITE][KNIGHT][5][5][pc] = -50;
@@ -1155,28 +1161,28 @@ public class YourEvaluator extends Evaluator {
         pst[WHITE][KNIGHT][1][4][pc] = -20;
         pst[WHITE][KNIGHT][5][0][pc] = -50;
         pst[WHITE][KNIGHT][4][1][pc] = -20;
-        /* KNIGHTS: Discourage LEFT SIDE EDGE */
+    /* KNIGHTS: Discourage LEFT SIDE EDGE */
         pst[WHITE][KNIGHT][0][1][pc] = -40;
         pst[WHITE][KNIGHT][0][2][pc] = -30;
         pst[WHITE][KNIGHT][0][3][pc] = -30;
         pst[WHITE][KNIGHT][0][4][pc] = -40;
-        /* KNIGHTS: Discourage RIGHT SIDE EDGE */
+    /* KNIGHTS: Discourage RIGHT SIDE EDGE */
         pst[WHITE][KNIGHT][5][1][pc] = -40;
         pst[WHITE][KNIGHT][5][2][pc] = -30;
         pst[WHITE][KNIGHT][5][3][pc] = -30;
         pst[WHITE][KNIGHT][5][4][pc] = -40;
-        /* KNIGHTS: Discourage OPPONENT'S EDGE */
+    /* KNIGHTS: Discourage OPPONENT'S EDGE */
         pst[WHITE][KNIGHT][1][5][pc] = -40;
         pst[WHITE][KNIGHT][2][5][pc] = -30;
         pst[WHITE][KNIGHT][3][5][pc] = -30;
         pst[WHITE][KNIGHT][4][5][pc] = -40;
-        /* KNIGHTS: Discourage own edge (except knight starting positions) */
+    /* KNIGHTS: Discourage own edge (except knight starting positions) */
         pst[WHITE][KNIGHT][2][0][pc] = -30;
         pst[WHITE][KNIGHT][3][0][pc] = -30;
-        /* KNIGHTS: Encourage 2nd row center */
+    /* KNIGHTS: Encourage 2nd row center */
         pst[WHITE][KNIGHT][3][1][pc] = 10;
         pst[WHITE][KNIGHT][2][1][pc] = 10;
-        /* KNIGHTS, copy 24pc setup to 23->0pc */
+    /* KNIGHTS, copy 24pc setup to 23->0pc */
         for (int y=0; y<6; y++) {
             for (int x=0; x<6; x++) {
                 for (pc=23; pc>=0; pc--) {
@@ -1184,19 +1190,19 @@ public class YourEvaluator extends Evaluator {
                 }
             }
         }
-        
-        /* KNIGHTS, early game 21-24pc overwrite: */
+
+    /* KNIGHTS, early game 21-24pc overwrite: */
         for (pc=24; pc>=21; pc--) {
-            /* Stay back to avoid whipsawing */
+        /* Stay back to avoid whipsawing */
             pst[WHITE][KNIGHT][1][0][pc] = 10;
             pst[WHITE][KNIGHT][4][0][pc] = 10;
-            /* Increased bonus for 2nd row center */
+        /* Increased bonus for 2nd row center */
             pst[WHITE][KNIGHT][2][1][pc] = 20;
             pst[WHITE][KNIGHT][3][1][pc] = 20;
         }
-        /* KNIGHTS, 20pc->0pc no more stayback-bonuses */
-                
-        /* KNIGHTS, 19pc down: Smooth transition into penalties for staying put */
+    /* KNIGHTS, 20pc->0pc no more stayback-bonuses */
+
+    /* KNIGHTS, 19pc down: Smooth transition into penalties for staying put */
         pst[WHITE][KNIGHT][1][0][19] = -10;
         pst[WHITE][KNIGHT][4][0][19] = -10;
         pst[WHITE][KNIGHT][1][0][18] = -20;
@@ -1207,7 +1213,7 @@ public class YourEvaluator extends Evaluator {
             pst[WHITE][KNIGHT][1][0][pc] = -40;
             pst[WHITE][KNIGHT][4][0][pc] = -40;
         }
-        /* KNIGHTS, 19pc down: Smooth transition into larger center bonus */
+    /* KNIGHTS, 19pc down: Smooth transition into larger center bonus */
         pst[WHITE][KNIGHT][2][3][19] = 10;
         pst[WHITE][KNIGHT][2][2][19] = 10;
         pst[WHITE][KNIGHT][3][3][19] = 10;
@@ -1222,8 +1228,8 @@ public class YourEvaluator extends Evaluator {
             pst[WHITE][KNIGHT][3][3][pc] = 20;
             pst[WHITE][KNIGHT][3][2][pc] = 20;
         }
-        
-        /* QUEEN: bonus for staying back in early game (smooth transition) */
+
+    /* QUEEN: bonus for staying back in early game (smooth transition) */
         for (int x=0; x<6; x++) {
             pst[WHITE][QUEEN][x][1][24] = 20;
             pst[WHITE][QUEEN][x][0][24] = 20;
@@ -1240,8 +1246,8 @@ public class YourEvaluator extends Evaluator {
             pst[WHITE][QUEEN][x][1][18] = 2;
             pst[WHITE][QUEEN][x][0][18] = 2;
         }
-        
-        /* QUEEN & ROOK: bonuses for occupying enemy ranks */
+
+    /* QUEEN & ROOK: bonuses for occupying enemy ranks */
         for (pc=24; pc>=0; pc--) {
             for (int x=0; x<6; x++) {
                 pst[WHITE][QUEEN][x][4][pc] = 20; /* "7th rank" > "8th" */
@@ -1250,26 +1256,26 @@ public class YourEvaluator extends Evaluator {
                 pst[WHITE][ROOK][x][5][pc] = 10;
             }
         }
-        
-        /* KING: bonus for staying back until endgame */
+
+    /* KING: bonus for staying back until endgame */
         for (pc=24; pc>=10; pc--) {
             for (int x=0; x<6; x++) {
                 pst[WHITE][KING][x][0][pc] = 20;
                 pst[WHITE][KING][x][1][pc] = 7;
             }
         }
-        /* KING: smooth transition into endgame */
+    /* KING: smooth transition into endgame */
         for (int x=0; x<6; x++) {
             pst[WHITE][KING][x][0][9] = 12;
             pst[WHITE][KING][x][1][9] = 4;
             pst[WHITE][KING][x][0][8] = 6;
             pst[WHITE][KING][x][1][8] = 2;
         }
-        
-        /* TODO: King's endgame */
-        
-        
-        /* BLACK: replicate all from white, flip y's */
+
+    /* TODO: King's endgame */
+
+
+    /* BLACK: replicate all from white, flip y's */
         for (pc=24; pc>=0; pc--) {
             for (int y=0; y<6; y++) {
                 for (int x=0; x<6; x++) {
@@ -1279,9 +1285,9 @@ public class YourEvaluator extends Evaluator {
                 }
             }
         }
-        
-        
-        /* Draw some PST's */
+
+
+    /* Draw some PST's */
         if (true) return;
         int color = WHITE;
         int unit = PAWN;
@@ -1296,7 +1302,7 @@ public class YourEvaluator extends Evaluator {
             System.out.println("   At piececount " + pc);
             draw(copy);
         }
-        
+
     }
 
     private void generateTrivialLookupTables() {
@@ -1305,11 +1311,11 @@ public class YourEvaluator extends Evaluator {
         isEnemyRookOrQueen[WHITE][9] = true;
         isEnemyRookOrQueen[BLACK][2] = true;
         isEnemyRookOrQueen[BLACK][3] = true;
-        
+
         isFriendly = new boolean[2][13];
         for (int i=1; i<=6; i++) isFriendly[WHITE][i] = true;
         for (int i=7; i<=12; i++) isFriendly[BLACK][i] = true;
-        
+
         isEnemy = new boolean[2][13];
         for (int i=1; i<=6; i++) isEnemy[BLACK][i] = true;
         for (int i=7; i<=12; i++) isEnemy[WHITE][i] = true;
@@ -1321,8 +1327,8 @@ public class YourEvaluator extends Evaluator {
         PVpawn[3] = 101;
         PVpawn[2] = 107;
         PVpawn[1] = 120;
-        
-        /* Knight has more value when opponent has more pawns */
+
+    /* Knight has more value when opponent has more pawns */
         PVknight = new double[7];
         PVknight[6] = 315;
         PVknight[5] = 310;
@@ -1331,8 +1337,8 @@ public class YourEvaluator extends Evaluator {
         PVknight[2] = 295;
         PVknight[1] = 290;
         PVknight[0] = 280;
-        
-        /* Rook has more value when opponent has less pawns */
+
+    /* Rook has more value when opponent has less pawns */
         PVrook = new double[7];
         PVrook[6] = 500;
         PVrook[5] = 505;
@@ -1341,12 +1347,12 @@ public class YourEvaluator extends Evaluator {
         PVrook[2] = 536;
         PVrook[1] = 550;
         PVrook[0] = 570;
-        
-        
+
+
         PVpawnsTotal = new double[7];
         for (int i=1; i<=6; i++) PVpawnsTotal[i] = PVpawnsTotal[i-1] + PVpawn[i];
     }
-    
+
     public void reWeightMaterialScores(double weight) {
         PVqueen *= weight;
         PVking *= weight;
@@ -1354,12 +1360,12 @@ public class YourEvaluator extends Evaluator {
         for (int i=0; i<PVpawn.length; i++) PVpawn[i] *= weight;
         for (int i=0; i<PVrook.length; i++) PVrook[i] *= weight;
     }
-    
+
     public void reWeightKQscores(double weight) {
         PVqueen *= weight;
         PVking *= weight;
     }
-    
+
     public void reWeightPST(double weight) {
         for (int pc=24; pc>=0; pc--) {
             for (int y=0; y<6; y++) {
@@ -1373,7 +1379,7 @@ public class YourEvaluator extends Evaluator {
             }
         }
     }
-    
+
     private void initializeSqControl() {
         sqControlCount = new int[2][6][6];
         sqControlLowVal = new double[2][6][6];
@@ -1387,14 +1393,14 @@ public class YourEvaluator extends Evaluator {
     }
 
 
-    
-    
-    
-    
-    
 
-    /* Debugging helper methods below */
-    
+
+
+
+
+
+/* Debugging helper methods below */
+
     void analyzeScores() {
         System.out.println("Side to move: " + sideToMove);
         System.out.println("*************************");
@@ -1418,7 +1424,7 @@ public class YourEvaluator extends Evaluator {
         System.out.println("*************************");
         System.out.println(scoreAnalyzer[0].toString());
         System.out.println(scoreAnalyzer[0].overview());
-        
+
         if (Math.abs(score[WHITE] - scoreAnalyzer[WHITE].totalScore) > 0.001) {
             System.out.println("!!!!! ERROR !!!!!! White score actually " + score[WHITE] + ", but analyzer has " + scoreAnalyzer[WHITE].totalScore);
         }
@@ -1436,9 +1442,9 @@ public class YourEvaluator extends Evaluator {
     }
 
 
-    
+
     class ScoreAnalyzer {
-        
+
         LinkedHashMap<String, LinkedHashMap<String, Double>> elements;
         double totalScore;
 
@@ -1448,29 +1454,29 @@ public class YourEvaluator extends Evaluator {
         }
 
         void add(String category, String subcategory, Double value) {
-            /* Create category if it doesn't exist */
+        /* Create category if it doesn't exist */
             if (!elements.containsKey(category)) {
                 elements.put(category, new LinkedHashMap<String,Double>());
             }
-            /* Create subcategory if it doesn't exist */
+        /* Create subcategory if it doesn't exist */
             if (!elements.get(category).containsKey(subcategory)) {
                 elements.get(category).put(subcategory, 0.0);
             }
-            /* Modify value */
+        /* Modify value */
             totalScore += value;
             double combinedValue = value + elements.get(category).get(subcategory);
             elements.get(category).put(subcategory, combinedValue);
         }
-        
+
         double get(String category) {
             double v = 0;
-            
+
             if (category.equals("Bestcap")) {
                 v += get("Naive value for best IMMEDIATE capture");
                 v += get("Naive value for 2nd best capture");
                 return v;
             }
-            
+
             if (!elements.containsKey(category)) return 0;
             for (String sub : elements.get(category).keySet()) {
                 v += elements.get(category).get(sub);
@@ -1495,7 +1501,7 @@ public class YourEvaluator extends Evaluator {
             sb.append("= " + totalScore + " total score\n");
             return sb.toString();
         }
-        
+
         public String overview() {
             StringBuilder sb = new StringBuilder();
             sb.append("***************************************************\n");
@@ -1530,28 +1536,28 @@ public class YourEvaluator extends Evaluator {
             String bs = String.format("%0$.0f", scoreAnalyzer[BLACK].get(category));
             sb.append(cat + ws + mid + bs + "\n");
         }
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-    }   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    }
     public static void draw(int[][] d) {
         int max = 1;
         for (int y=0; y<d.length; y++) {
@@ -1596,11 +1602,11 @@ public class YourEvaluator extends Evaluator {
             System.out.println("");
         }
     }
-    
+
     public static String formatDouble(Double d) {
         return String.format("%.0f", d);
     }
-    
+
     public void clearHash() {
         evaluatedPositions.clear();
     }

@@ -6,7 +6,7 @@ import java.util.Vector;
 public class Position {
 
     
-        public int board [][];
+    public int board [][];
 	public boolean whiteToMove;
         public double cachedResult;
         public int winner = 0; // white = +1, black = -1
